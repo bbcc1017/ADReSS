@@ -5,6 +5,8 @@
 
 > **Paper Status:** Submitted to *Simulation Modelling Practice and Theory* (April 14, 2026). Currently under review.
 
+![Dashboard Screenshot](docs/images/dashboard_maps.png)
+
 ## Project Overview
 
 A simulation and analysis platform for **optimizing patient transport** during Mass Casualty Incidents (MCI).
