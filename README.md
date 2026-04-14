@@ -1,5 +1,10 @@
 # ADReSS: Automated Disaster Response Scenario Generation and Simulation for Evaluating Emergency Medical Services System
 
+![Status](https://img.shields.io/badge/Paper-Under%20Review-yellow)
+![Journal](https://img.shields.io/badge/Journal-Simulation%20Modelling%20Practice%20and%20Theory-blue)
+
+> **Paper Status:** Submitted to *Simulation Modelling Practice and Theory* (April 14, 2026). Currently under review.
+
 ## Project Overview
 
 A simulation and analysis platform for **optimizing patient transport** during Mass Casualty Incidents (MCI).
@@ -884,6 +889,29 @@ This project is currently under academic review. License terms will be specified
 
 ---
 
+## Citation
+
+If you find this work useful, please cite:
+
+```bibtex
+@article{ryu2026automated,
+  title   = {Automated disaster response scenario generation and simulation for evaluating emergency medical services system},
+  author  = {Ryu, Yeon-Woo and Kim, Jeong-Woo and Lee, Hyun-Rok},
+  journal = {Simulation Modelling Practice and Theory},
+  year    = {2026},
+  note    = {Submitted, Manuscript Number: SIMPAT-D-26-712}
+}
+```
+
+---
+
 ## Contact
 
-(Contact information to be added)
+**Department of Industrial Engineering, Inha University**
+100 Inha-ro, Michuhol-gu, Incheon 22212, Republic of Korea
+
+| # | Author | Role | Email |
+|---|--------|------|-------|
+| 1st | Yeon-Woo Ryu | M.S. Student | bbcc1017@inha.edu |
+| 2nd | Jeong-Woo Kim | B.S. Student | kimjeongwoo12210599@inha.edu |
+| * | Hyun-Rok Lee | Professor, Corresponding Author | hyunrok.lee@inha.ac.kr |

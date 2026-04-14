@@ -252,9 +252,16 @@ class ScenarioGenerator:
                     route = data["routes"][0]
                     result_code = route.get("result_code", 0)
                     if result_code != 0:
+                        _rc_msg = {
+                            101: "Unable to find roads near waypoint",
+                            102: "Unable to find roads near origin",
+                            103: "Unable to find roads near destination",
+                            104: "Origin and destination are within 5m",
+                            105: "Traffic incident on roads near origin",
+                        }.get(result_code, "Unknown error")
                         raise RuntimeError(
                             f"Kakao API no route (result_code={result_code}, {start} -> {end}): "
-                            f"Segment unreachable without ferry."
+                            f"{_rc_msg}"
                         )
                     summary = route.get("summary", {})
 
