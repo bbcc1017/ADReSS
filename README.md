@@ -1,7 +1,7 @@
 # ADReSS: Automated Disaster Response Scenario Generation and Simulation for Evaluating Emergency Medical Services System
 
 ![Status](https://img.shields.io/badge/Paper-Under%20Review-yellow)
-![Journal](https://img.shields.io/badge/Journal-Simulation%20Modelling%20Practice%20and%20Theory-blue)
+[![Journal](https://img.shields.io/badge/Journal-Simulation%20Modelling%20Practice%20and%20Theory-blue)](https://www.sciencedirect.com/journal/simulation-modelling-practice-and-theory)
 
 > **Paper Status:** Submitted to *Simulation Modelling Practice and Theory* (April 14, 2026). Currently under review.
 
@@ -805,25 +805,17 @@ Visualization value = average of 64 means per block (mean of means)
 ## Installation and Execution
 
 ### Environment Requirements
-- Python 3.9 or higher
+- Python 3.12 or higher
 - Windows / Linux / macOS
 
 ### Installation
 ```bash
 # 1. Create Conda environment (recommended)
-conda create -n MCI python=3.9
+conda create -n MCI python=3.12
 conda activate MCI
 
 # 2. Install packages
 pip install -r requirements.txt
-
-# Or install individually
-pip install streamlit==1.50.0 pandas==2.2.2 numpy==1.26.4 \
-    folium==0.20.0 streamlit-folium==0.25.1 altair==5.5.0 \
-    plotly==6.5.1 openpyxl==3.1.2 PyYAML==6.0.2 \
-    requests==2.32.4 haversine==2.9.0 scipy==1.13.1 \
-    statsmodels==0.14.5 scikit-posthocs==0.11.4 pingouin==0.5.5 \
-    gymnasium==1.0.0
 ```
 
 ### Required Files
