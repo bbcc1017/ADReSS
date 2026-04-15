@@ -14,7 +14,7 @@ A simulation and analysis platform for **optimizing patient transport** during M
 ### Key Features
 - **Scenario Generation**: Real-time/future traffic data via Kakao Mobility API or OSRM
 - **Simulation Engine**: Evaluates 64 policy combinations using ambulances (AMB) and drones (UAV)
-- **Statistical Analysis**: Full Factorial ANOVA with post-hoc tests
+- **Statistical Analysis**: Full Factorial ANOVA, EMM-based post-hoc, CLD (Piepho 2004)
 - **Visualization Dashboard**: Streamlit-based web interface
 
 ---
@@ -690,16 +690,25 @@ streamlit run pages/Generate.py
 - **Popup**: Click to show distance (km), time (min)
 
 #### 4. Analytics Tab
+- **Sub-tab structure**: RAW Data | STAT Summary | ANOVA Suite
 - **Metric selection**: Reward, Time, PDR, Reward w.o.G, PDR w.o.G
 - **Sort criteria**: Reward↓, PDR↑, Time↑
 - **ANOVA design**:
-  - Full Factorial: Phase × RedPolicy × RedAction × YellowAction
-  - One-way: Single factor
-  - RCBD: Randomized Complete Block Design
-- **Significance level**: α = 0.001 ~ 0.1
-- **Post-hoc tests**: Tukey HSD (equal variance), Games-Howell (unequal variance)
-- **Residual diagnostics**: Shapiro-Wilk test, QQ plot, histogram
-- **Group-A intersection**: Recommend scenarios in the top group across all metrics
+  - One-way: `value ~ C(rule)` — single factor
+  - RCBD: `value ~ C(rule) + C(run)` — run as block (CRN assumption)
+  - Reduced Factorial: `value ~ C(run) + 4 main effects + 6 two-way interactions` — with block
+- **Significance level**: α = 0.001 ~ 0.1 (slider)
+- **Post-hoc tests**:
+  - RCBD/Factorial: **EMM (Estimated Marginal Means)** pairwise t-test + Holm correction (uses model MS_residual)
+  - One-way: Games-Howell (robust to heteroscedasticity)
+  - Fallback: Pairwise Welch t-test + Holm correction (when pingouin unavailable)
+- **CLD (Compact Letter Display)**: Piepho (2004) absorption algorithm — multi-letter assignment (e.g., "ab")
+- **Effect sizes**: η² (eta-squared), ω² (omega-squared, bias-corrected)
+- **Residual diagnostics**: Shapiro-Wilk + Anderson-Darling normality, QQ plot, histogram, Residuals vs Fitted
+- **Homoscedasticity test**: Levene (Brown-Forsythe variant, center=median)
+- **RCBD additivity**: Tukey 1-df non-additivity test
+- **A-group intersection**: Recommend scenarios containing letter 'a' across Reward↑ ∩ Time↓ ∩ PDR↓
+- **CRN assumption**: RCBD/Factorial modes assume all 64 rules within each run share the same random seed
 
 #### 5. Data Tables Tab
 - CSV file selection (filename only, path hidden)

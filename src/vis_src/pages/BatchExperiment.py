@@ -189,7 +189,81 @@ _SKIP = "__SKIP__"
 # PAGE START
 # ===========================================================================
 
-st.set_page_config(page_title="Batch Experiment", page_icon="🔬", layout="wide")
+st.set_page_config(page_title="Batch Experiment", page_icon="⚗️", layout="wide")
+
+st.markdown("""<style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=DM+Sans:wght@400;500;600&display=swap');
+
+html, body, .stApp, [data-testid="stAppViewContainer"] {
+    font-family: 'DM Sans', -apple-system, sans-serif !important;
+}
+h1, h2, h3, h4, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+    font-family: 'Outfit', sans-serif !important;
+    color: #e2e8f0 !important;
+    font-weight: 600 !important;
+}
+.stApp {
+    background: #141417;
+}
+[data-testid="stSidebar"] {
+    background: #1c1c21 !important;
+    border-right: 1px solid rgba(226, 160, 74, 0.08) !important;
+}
+.stTabs [data-baseweb="tab-list"] {
+    background: rgba(28, 28, 33, 0.8);
+    border-radius: 12px;
+    padding: 4px;
+    gap: 4px;
+    border: 1px solid rgba(226, 160, 74, 0.08);
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius: 8px;
+    padding: 8px 20px;
+    font-weight: 500;
+    color: #94a3b8 !important;
+    transition: all 0.2s ease;
+}
+.stTabs [aria-selected="true"] {
+    background: rgba(226, 160, 74, 0.15) !important;
+    color: #e2a04a !important;
+    box-shadow: 0 1px 4px rgba(226, 160, 74, 0.1);
+}
+.stButton > button {
+    border-radius: 8px !important;
+    border: 1px solid rgba(226, 160, 74, 0.3) !important;
+    background: rgba(226, 160, 74, 0.12) !important;
+    color: #e2a04a !important;
+    font-weight: 500 !important;
+    padding: 8px 20px !important;
+    transition: all 0.2s ease !important;
+}
+.stButton > button:hover {
+    background: rgba(226, 160, 74, 0.22) !important;
+    border-color: rgba(226, 160, 74, 0.5) !important;
+}
+[data-baseweb="input"], [data-baseweb="select"] > div {
+    background: rgba(20, 20, 23, 0.8) !important;
+    border: 1px solid rgba(226, 160, 74, 0.1) !important;
+    border-radius: 8px !important;
+}
+[data-testid="stMetric"] {
+    background: rgba(28, 28, 33, 0.6);
+    border: 1px solid rgba(226, 160, 74, 0.08);
+    border-left: 3px solid #e2a04a;
+    border-radius: 10px;
+    padding: 16px;
+}
+[data-testid="stExpander"] {
+    background: rgba(28, 28, 33, 0.5) !important;
+    border: 1px solid rgba(226, 160, 74, 0.08) !important;
+    border-radius: 10px !important;
+}
+hr { border-color: rgba(226, 160, 74, 0.08) !important; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(226, 160, 74, 0.25); border-radius: 4px; }
+</style>""", unsafe_allow_html=True)
+
 st.title("Batch Experiment Pipeline")
 st.caption("End-to-end workflow: coordinate generation → scenario → simulation → visualization")
 

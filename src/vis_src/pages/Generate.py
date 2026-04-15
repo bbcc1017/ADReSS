@@ -44,6 +44,104 @@ st.set_page_config(
     layout="wide"
 )
 
+# ── Command-Center Theme CSS ──────────────────────────────────────
+st.markdown("""<style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=DM+Sans:wght@400;500;700&display=swap');
+
+/* ── Global ── */
+html, body, [class*="css"] {
+    font-family: 'DM Sans', sans-serif;
+    color: #d4d4d8;
+}
+h1, h2, h3, h4, h5, h6,
+[data-testid="stMarkdownContainer"] h1,
+[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3 {
+    font-family: 'Outfit', sans-serif;
+    background: linear-gradient(135deg, #e2a04a 0%, #2dd4bf 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.stApp, [data-testid="stAppViewContainer"],
+[data-testid="stHeader"] {
+    background-color: #141417;
+}
+[data-testid="stSidebar"] {
+    background-color: #1a1a1f;
+}
+
+/* ── Buttons ── */
+.stButton > button,
+[data-testid="stFormSubmitButton"] > button {
+    background: linear-gradient(135deg, #e2a04a 0%, #c7893e 100%);
+    color: #141417;
+    border: none;
+    border-radius: 8px;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 600;
+    transition: opacity .2s;
+}
+.stButton > button:hover,
+[data-testid="stFormSubmitButton"] > button:hover {
+    opacity: .85;
+    color: #141417;
+}
+button[kind="primary"] {
+    background: linear-gradient(135deg, #e2a04a 0%, #c7893e 100%) !important;
+}
+
+/* ── Inputs ── */
+input, textarea, [data-baseweb="input"] input,
+[data-baseweb="textarea"] textarea {
+    background-color: #1e1e23 !important;
+    color: #d4d4d8 !important;
+    border: 1px solid #2a2a30 !important;
+    border-radius: 6px !important;
+}
+input:focus, textarea:focus,
+[data-baseweb="input"] input:focus {
+    border-color: #e2a04a !important;
+    box-shadow: 0 0 0 1px #e2a04a33 !important;
+}
+
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px;
+}
+.stTabs [data-baseweb="tab"] {
+    background-color: transparent;
+    color: #d4d4d8;
+    border-radius: 6px 6px 0 0;
+    font-family: 'DM Sans', sans-serif;
+}
+.stTabs [aria-selected="true"] {
+    background-color: #1e1e23;
+    border-bottom: 2px solid #e2a04a;
+}
+
+/* ── Metric cards ── */
+[data-testid="stMetric"] {
+    background: #1e1e23;
+    border: 1px solid #2a2a30;
+    border-radius: 10px;
+    padding: 14px 18px;
+}
+[data-testid="stMetricLabel"] {
+    color: #a1a1aa;
+    font-family: 'DM Sans', sans-serif;
+}
+[data-testid="stMetricValue"] {
+    color: #e2a04a;
+    font-family: 'Outfit', sans-serif;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #141417; }
+::-webkit-scrollbar-thumb { background: #2a2a30; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a40; }
+</style>""", unsafe_allow_html=True)
+
 # ─────────────────────────────────────────────────────────────────
 # Utility functions
 # ─────────────────────────────────────────────────────────────────
@@ -124,9 +222,6 @@ def perform_address_search(search_query, api_key):
         url = "https://dapi.kakao.com/v2/local/search/address.json"
         headers = {"Authorization": f"KakaoAK {api_key.strip()}"}
 
-        st.caption(f"🔍 Debug: API URL = {url}")
-        st.caption(f"🔍 Debug: query = {search_query}")
-
         params = {
             "query": search_query,
             "analyze_type": "similar",  # Allow partial matches
@@ -134,12 +229,15 @@ def perform_address_search(search_query, api_key):
         }
 
         response = requests.get(url, headers=headers, params=params, timeout=10)
-        st.caption(f"🔍 Debug: status = {response.status_code}")
 
         if response.status_code == 200:
             data = response.json()
             documents = data.get("documents", [])
-            st.caption(f"🔍 Debug: results = {len(documents)}")
+            with st.expander("Debug Info", expanded=False):
+                st.caption(f"API URL = {url}")
+                st.caption(f"query = {search_query}")
+                st.caption(f"status = {response.status_code}")
+                st.caption(f"results = {len(documents)}")
 
             # Normalize results to match keyword search format
             normalized = [normalize_search_result(doc, "Address Search") for doc in documents]
@@ -280,7 +378,7 @@ st.info("💡 This page operates **completely independently** from the main app'
 # 1. Project path (base_path) input
 # ─────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown("### 📁 Project Path Setup")
+st.markdown("### Project Path Setup")
 
 col_path, col_btn = st.columns([4, 1])
 with col_path:
@@ -462,7 +560,7 @@ duration_coeff = st.number_input(
 )
 
 st.markdown("---")
-st.markdown("### 2️⃣ Coordinate Search")
+st.markdown("### Coordinate Search")
 
 # Search type selector
 search_type = st.radio(
@@ -494,28 +592,28 @@ if "selected_place_name" not in st.session_state:
 if "selected_place_index" not in st.session_state:
     st.session_state.selected_place_index = -1  # -1 means nothing selected
 
-col_search, col_search_btn = st.columns([3, 1])
-with col_search:
-    # Dynamic placeholder and help text based on search type
-    if search_type == "Keyword Search":
-        placeholder = "e.g. Incheon Airport, Seoul Station"
-        help_text = "Search places via Kakao API"
-        label = "🔍 Place Search"
-    else:
-        placeholder = "e.g. Seoul Gangnam-gu Teheran-ro 152"
-        help_text = "Search address via Kakao API (road/lot number)"
-        label = "🔍 Address Search"
+# Dynamic placeholder and help text based on search type
+if search_type == "Keyword Search":
+    placeholder = "e.g. Incheon Airport, Seoul Station"
+    help_text = "Search places via Kakao API"
+    label = "Place Search"
+else:
+    placeholder = "e.g. Seoul Gangnam-gu Teheran-ro 152"
+    help_text = "Search address via Kakao API (road/lot number)"
+    label = "Address Search"
 
-    search_keyword = st.text_input(
-        label,
-        placeholder=placeholder,
-        help=help_text,
-        key="search_input"
-    )
-with col_search_btn:
-    st.write("")  # alignment spacer
-    st.write("")  # alignment spacer
-    search_button = st.button("🔎 Search", key="search_place")
+with st.form(key="search_form"):
+    col_search, col_search_btn = st.columns([3, 1])
+    with col_search:
+        search_keyword = st.text_input(
+            label,
+            placeholder=placeholder,
+            help=help_text,
+        )
+    with col_search_btn:
+        st.write("")
+        st.write("")
+        search_button = st.form_submit_button("Search")
 
 # Execute search
 if search_button and search_keyword:
@@ -538,11 +636,6 @@ if search_button and search_keyword:
                     "Authorization": f"KakaoAK {kakao_api_key.strip()}"
                 }
 
-                # Debug: print request info
-                st.caption(f"🔍 Debug: API URL = {url}")
-                st.caption(f"🔍 Debug: header = Authorization: KakaoAK {kakao_api_key[:4]}...{kakao_api_key[-4:]}")
-                st.caption(f"🔍 Debug: query = {search_keyword}")
-
                 params = {
                     "query": search_keyword,
                     "size": 10  # Max 10 results
@@ -551,16 +644,18 @@ if search_button and search_keyword:
                 # API request
                 response = requests.get(url, headers=headers, params=params, timeout=10)
 
-                # Status code debug
-                st.caption(f"🔍 Debug: status = {response.status_code}")
-
                 # Check response
                 if response.status_code == 200:
                     data = response.json()
                     documents = data.get("documents", [])
 
-                    st.caption(f"🔍 Debug: response keys = {list(data.keys())}")
-                    st.caption(f"🔍 Debug: results = {len(documents)}")
+                    with st.expander("Debug Info", expanded=False):
+                        st.caption(f"API URL = {url}")
+                        st.caption(f"header = Authorization: KakaoAK {kakao_api_key[:4]}...{kakao_api_key[-4:]}")
+                        st.caption(f"query = {search_keyword}")
+                        st.caption(f"status = {response.status_code}")
+                        st.caption(f"response keys = {list(data.keys())}")
+                        st.caption(f"results = {len(documents)}")
 
                     if documents:
                         # Normalize keyword results

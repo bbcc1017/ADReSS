@@ -1220,7 +1220,7 @@ st.set_page_config(page_title="MCI Streamlit", page_icon="📊", layout="wide")
 
 
 with st.sidebar:
-    st.header("⚙️ Settings")
+    st.header("Settings")
 
     base_input = st.text_input(
         "base_path",
@@ -1271,38 +1271,12 @@ with st.sidebar:
             lat, lon = coord_center(st.session_state.selected_coord)
             st.caption("Current Coordinate")
 
-            # -- Basemap selection (light only) + theme toggle --
-            col_m1, col_m2 = st.columns(2)
-            with col_m1:
-                basemap_choice_ui = st.selectbox(
-                    "Light Tile",
-                    ["OpenStreetMap","CartoDB Positron"],
-                    index=0,
-                    key="mini_basemap_light",
-                )
-            with col_m2:
-                theme_choice = st.radio(
-                    "Theme",
-                    ["Light", "Dark"],
-                    index=0,
-                    horizontal=True,
-                    key="mini_theme",
-                )
-
             # -- folium-based render (same display logic: single point) --
             try:
                 import folium
                 from streamlit_folium import st_folium
 
-                # UI label -> folium tile name mapping
-                tile_map_light = {
-                    "CartoDB Positron": "CartoDB positron",
-                    "OpenStreetMap": "OpenStreetMap",
-                }
-                # Dark is fixed
-                tile_dark = "CartoDB dark_matter"
-
-                chosen_tile = tile_dark if theme_choice == "Dark" else tile_map_light[basemap_choice_ui]
+                chosen_tile = "CartoDB positron"
 
                 m = folium.Map(location=(lat, lon), zoom_start=12, control_scale=True, tiles=chosen_tile)
                 folium.CircleMarker(
@@ -1342,30 +1316,31 @@ st.markdown("""
 .stMultiSelect [data-baseweb="select"]{max-width:100%!important}
 
 /* -- Font -- */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap');
 html, body, .stApp, [data-testid="stAppViewContainer"] {
-    font-family: 'Inter', 'Pretendard', -apple-system, sans-serif !important;
+    font-family: 'DM Sans', -apple-system, sans-serif !important;
+}
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', 'DM Sans', -apple-system, sans-serif !important;
 }
 
-/* -- Background gradient -- */
+/* -- Background -- */
 .stApp {
-    background: linear-gradient(160deg, #0a0f1e 0%, #111827 40%, #0f172a 100%);
+    background: #141417;
 }
 
 /* -- Sidebar -- */
 [data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #0d1526 0%, #111d35 100%) !important;
-    border-right: 1px solid rgba(56, 189, 248, 0.08) !important;
+    background: #1c1c21 !important;
+    border-right: 1px solid rgba(226, 160, 74, 0.1) !important;
 }
 [data-testid="stSidebar"] .stMarkdown h1,
 [data-testid="stSidebar"] .stMarkdown h2,
 [data-testid="stSidebar"] .stMarkdown h3 {
-    background: linear-gradient(90deg, #38bdf8, #818cf8);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: #e2a04a !important;
 }
 [data-testid="stSidebar"] label {
-    color: #cbd5e1 !important;
+    color: #a1a1aa !important;
     font-weight: 500;
     font-size: 0.85rem;
 }
@@ -1375,65 +1350,64 @@ h1 {
     font-weight: 700 !important;
     letter-spacing: -0.5px;
     padding-bottom: 4px;
-    color: #e2e8f0 !important;
+    color: #e4e4e7 !important;
 }
 .gradient-text {
-    background: linear-gradient(90deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
+    background: linear-gradient(90deg, #e2a04a 0%, #2dd4bf 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 
 /* -- Subheader -- */
 h2, h3 {
-    color: #e2e8f0 !important;
+    color: #e4e4e7 !important;
     font-weight: 600 !important;
-    border-bottom: 2px solid rgba(56, 189, 248, 0.15);
+    border-bottom: 2px solid rgba(226, 160, 74, 0.18);
     padding-bottom: 8px;
     margin-bottom: 16px !important;
 }
 
 /* -- Tab bar -- */
 .stTabs [data-baseweb="tab-list"] {
-    background: rgba(15, 23, 42, 0.6);
-    border-radius: 14px;
-    padding: 5px;
+    background: #1c1c21;
+    border-radius: 10px;
+    padding: 4px;
     gap: 4px;
-    border: 1px solid rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.06);
 }
 .stTabs [data-baseweb="tab"] {
-    border-radius: 10px;
+    border-radius: 8px;
     padding: 10px 22px;
     font-weight: 500;
-    color: #94a3b8 !important;
-    transition: all 0.25s ease;
+    color: #71717a !important;
+    transition: all 0.2s ease;
 }
 .stTabs [aria-selected="true"] {
-    background: linear-gradient(135deg, #1e3a5f, #1e40af) !important;
-    color: #e0f2fe !important;
-    box-shadow: 0 2px 12px rgba(59, 130, 246, 0.25);
+    background: rgba(226, 160, 74, 0.15) !important;
+    color: #e2a04a !important;
+    box-shadow: none;
+    border-bottom: 2px solid #e2a04a;
 }
 .stTabs [data-baseweb="tab"]:hover {
-    color: #e2e8f0 !important;
-    background: rgba(30, 58, 95, 0.4);
+    color: #d4d4d8 !important;
+    background: rgba(255, 255, 255, 0.04);
 }
 .stTabs [data-baseweb="tab-highlight"] { display: none; }
 .stTabs [data-baseweb="tab-border"] { display: none; }
 
-/* -- Button -- */
+/* -- Button (primary: amber) -- */
 .stButton > button {
-    border-radius: 10px !important;
-    border: 1px solid rgba(59, 130, 246, 0.3) !important;
-    background: linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%) !important;
-    color: #e0f2fe !important;
-    font-weight: 500 !important;
+    border-radius: 8px !important;
+    border: 1px solid rgba(226, 160, 74, 0.4) !important;
+    background: rgba(226, 160, 74, 0.12) !important;
+    color: #e2a04a !important;
+    font-weight: 600 !important;
     padding: 8px 20px !important;
-    transition: all 0.25s ease !important;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    transition: all 0.2s ease !important;
 }
 .stButton > button:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.3) !important;
-    border-color: rgba(56, 189, 248, 0.5) !important;
+    background: rgba(226, 160, 74, 0.22) !important;
+    border-color: #e2a04a !important;
 }
 .stButton > button:active { transform: translateY(0); }
 
@@ -1442,87 +1416,87 @@ h2, h3 {
 [data-baseweb="select"] > div,
 .stTextInput > div > div,
 .stNumberInput > div > div > div {
-    background: rgba(15, 23, 42, 0.6) !important;
-    border: 1px solid rgba(56, 189, 248, 0.12) !important;
-    border-radius: 10px !important;
+    background: #1c1c21 !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-radius: 8px !important;
     transition: border-color 0.2s ease;
 }
 [data-baseweb="input"]:focus-within,
 [data-baseweb="select"] > div:focus-within {
-    border-color: rgba(59, 130, 246, 0.5) !important;
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1) !important;
+    border-color: rgba(226, 160, 74, 0.5) !important;
+    box-shadow: 0 0 0 2px rgba(226, 160, 74, 0.08) !important;
 }
 
 /* -- Dropdown menu -- */
 [data-baseweb="popover"] {
-    border-radius: 12px !important;
-    border: 1px solid rgba(56, 189, 248, 0.12) !important;
+    border-radius: 8px !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
     overflow: hidden;
 }
-[data-baseweb="menu"] { background: #111827 !important; }
+[data-baseweb="menu"] { background: #1c1c21 !important; }
 
-/* ── Expander ── */
+/* -- Expander -- */
 [data-testid="stExpander"] {
-    background: rgba(15, 23, 42, 0.4) !important;
-    border: 1px solid rgba(56, 189, 248, 0.08) !important;
-    border-radius: 14px !important;
+    background: #1c1c21 !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    border-radius: 10px !important;
     overflow: hidden;
-    transition: border-color 0.2s ease;
 }
 [data-testid="stExpander"]:hover {
-    border-color: rgba(56, 189, 248, 0.18) !important;
+    border-color: rgba(255, 255, 255, 0.12) !important;
 }
 
 /* -- Metric card -- */
 [data-testid="stMetric"] {
-    background: rgba(15, 23, 42, 0.5);
-    border: 1px solid rgba(56, 189, 248, 0.08);
-    border-radius: 14px;
+    background: #1c1c21;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-left: 3px solid #e2a04a;
+    border-radius: 10px;
     padding: 18px 20px;
     transition: all 0.2s ease;
 }
 [data-testid="stMetric"]:hover {
-    border-color: rgba(56, 189, 248, 0.2);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    border-color: rgba(255, 255, 255, 0.1);
+    border-left-color: #e2a04a;
 }
 [data-testid="stMetricLabel"] {
-    color: #94a3b8 !important;
+    color: #71717a !important;
     font-size: 0.82rem !important;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
 [data-testid="stMetricValue"] {
-    color: #e0f2fe !important;
+    color: #e4e4e7 !important;
     font-weight: 700 !important;
 }
 
 /* -- DataFrame -- */
 [data-testid="stDataFrame"], .stDataFrame {
-    border-radius: 12px !important;
+    border-radius: 8px !important;
     overflow: hidden;
-    border: 1px solid rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 /* -- Divider -- */
 hr {
-    border-color: rgba(56, 189, 248, 0.1) !important;
+    border-color: rgba(255, 255, 255, 0.06) !important;
     margin: 24px 0 !important;
 }
 
 /* -- Alert messages -- */
-.stAlert, [data-testid="stAlert"] { border-radius: 10px !important; }
+.stAlert, [data-testid="stAlert"] { border-radius: 8px !important; }
 
 /* -- Checkbox/radio hover -- */
-.stCheckbox label:hover, .stRadio label:hover { color: #38bdf8 !important; }
+.stCheckbox label:hover, .stRadio label:hover { color: #e2a04a !important; }
 
 /* -- Scrollbar -- */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.3); }
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #141417; }
 ::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, #1e40af, #38bdf8);
+    background: #3f3f46;
     border-radius: 4px;
 }
-::-webkit-scrollbar-thumb:hover { background: #38bdf8; }
+::-webkit-scrollbar-thumb:hover { background: #52525b; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1534,7 +1508,7 @@ tabs = st.tabs(["Maps", "Scenarios", "Analytics", "Data Tables", "Rerun"])
 # Scenarios tab
 # ------------------------------
 with tabs[1]:
-    st.subheader("📁 Selected Scenario")
+    st.subheader("Selected Scenario")
     bp = st.session_state.base_path; exp = st.session_state.selected_exp; coord = st.session_state.selected_coord
 
     # Reset log load state when scenario changes
@@ -1554,7 +1528,7 @@ with tabs[1]:
         site_info, sim_info = summarize_experiment_extended(smdf)
         site_info["Coordinate"] = f"{lat:.6f}, {lon:.6f}"
 
-        with st.expander("📝 View Experiment Summary", expanded=True):
+        with st.expander("View Experiment Summary", expanded=True):
             left, right = st.columns([0.42, 0.58])
             with left:
                 st.markdown("**Incident Site**")
@@ -1591,11 +1565,11 @@ with tabs[1]:
             st.caption(f"💡 For performance, logs with 101+ iterations should be checked in the source folder.")
 
             # Show button in disabled state
-            st.button("📂 Load Log Files", key="load_logs_btn_disabled", disabled=True, help="Log viewer is disabled for 101+ iterations")
+            st.button("Load Log Files", key="load_logs_btn_disabled", disabled=True, help="Log viewer is disabled for 101+ iterations")
             logs = None
         else:
             # Performance optimization: load logs only on button click (improves other tab loading speed)
-            if st.button("📂 Load Log Files", key="load_logs_btn", help="Click to load logs"):
+            if st.button("Load Log Files", key="load_logs_btn", help="Click to load logs"):
                 st.session_state.logs_loaded = True
 
             if st.session_state.get("logs_loaded", False):
@@ -1673,7 +1647,7 @@ with tabs[1]:
 # Maps tab (multi-select + UAV dispatch/transport toggle + enhanced legend)
 # ------------------------------
 with tabs[0]:
-    st.subheader("🗺️ Map Visualization")
+    st.subheader("Map Visualization")
     bp   = st.session_state.base_path
     exp  = st.session_state.selected_exp
     coord= st.session_state.selected_coord
@@ -1739,8 +1713,10 @@ with tabs[0]:
     # ─────────────────────────────────────────────────────────────────────
     # AMB Routes (C->S table / S->H table)
     # ─────────────────────────────────────────────────────────────────────
-    st.markdown("### AMB Routes")
-    col_amb_c2s, col_amb_s2h = st.columns(2)
+    _route_exp = st.expander("Route Details & Selection", expanded=False)
+    with _route_exp:
+        st.markdown("### AMB Routes")
+        col_amb_c2s, col_amb_s2h = st.columns(2)
 
     # --- AMB: C->S (Dispatch) table (Show, Index, Fire Station, Distance) ---
     with col_amb_c2s:
@@ -2468,7 +2444,7 @@ RAW_RE = re.compile(r'^(START|ReSTART),\s*(RedOnly|YellowNearest),\s*Red\s+([A-Z
 
 # ===== Analysis tab =====
 with tabs[2]:
-    st.subheader("📊 RAW Result Analysis (results_{coord}.txt)")
+    st.subheader("RAW Result Analysis (results_{coord}.txt)")
 
     bp   = st.session_state.base_path
     exp  = st.session_state.selected_exp
@@ -2489,43 +2465,45 @@ with tabs[2]:
         # Performance optimization: load Analytics data only on button click
         st.info("💡 Large simulation results may take time to load. Click the button below to start analysis.")
 
-        if st.button("📊 Load Analysis Data", key="load_analytics_btn", help="Parse and analyze RAW results"):
+        if st.button("Load Analysis Data", key="load_analytics_btn", help="Parse and analyze RAW results"):
             st.session_state.analytics_loaded = True
 
         if not st.session_state.get("analytics_loaded", False):
             st.caption("💡 Click 'Load Analysis Data' above to view analysis. (Disabled by default for faster tab loading)")
         else:
-            # -- RAW: Toggle display of selected metrics only
-            raw_tables = {}
-            if rpath and os.path.exists(rpath):
-                with st.spinner("Parsing RAW results... (large files may take a moment)"):
-                    raw_tables = parse_raw_all_metrics(rpath)  # {metric: df}
+            analytics_tabs = st.tabs(["RAW Data", "STAT Summary", "ANOVA Suite"])
 
-                if raw_tables:
-                    # Only expose metrics actually present in the file
-                    metric_options = [m for m in RAW_METRIC_NAMES if m in raw_tables.keys()]
-                    picked = st.multiselect(
-                        "Select metrics to display",
-                        options=metric_options,
-                        default=[metric_options[0]] if metric_options else [],
-                        help="Only selected metrics will be shown below."
-                    )
-                    for m in picked:
-                        st.markdown(f"#### ▶ RAW Table — **{m}** (per run)")
-                        st.dataframe(raw_tables[m], width='stretch')
+            # -- RAW Data sub-tab --
+            with analytics_tabs[0]:
+                raw_tables = {}
+                if rpath and os.path.exists(rpath):
+                    with st.spinner("Parsing RAW results... (large files may take a moment)"):
+                        raw_tables = parse_raw_all_metrics(rpath)  # {metric: df}
+
+                    if raw_tables:
+                        # Only expose metrics actually present in the file
+                        metric_options = [m for m in RAW_METRIC_NAMES if m in raw_tables.keys()]
+                        picked = st.multiselect(
+                            "Select metrics to display",
+                            options=metric_options,
+                            default=[metric_options[0]] if metric_options else [],
+                            help="Only selected metrics will be shown below."
+                        )
+                        for m in picked:
+                            st.markdown(f"#### RAW Table -- **{m}** (per run)")
+                            st.dataframe(raw_tables[m], width='stretch')
+                    else:
+                        st.warning("No readable blocks found in RAW (results_*.txt).")
                 else:
-                    st.warning("No readable blocks found in RAW (results_*.txt).")
-            else:
-                st.warning("RAW (results_*.txt) file not found.")
+                    st.warning("RAW (results_*.txt) file not found.")
 
-            st.divider()
-
-            # ===== (existing) STAT summary analysis section =====
-            st.subheader("📈 STAT Summary Analysis (_stat.txt)")
-            st.info(
-                "📂 results/exp_YYYYMMDD_HHMMSS/(lat,lon)/results_{coord}.txt (Raw), results_{coord}_stat.txt (Stats)\n\n"
-                "- **Reward**: Sum of survival probabilities\n- **Time**: Elapsed time\n- **PDR**\n- **w.o.G**: Metrics excluding Green patients"
-            )
+            # -- STAT Summary sub-tab --
+            with analytics_tabs[1]:
+                st.subheader("STAT Summary Analysis (_stat.txt)")
+                st.info(
+                    "results/exp_YYYYMMDD_HHMMSS/(lat,lon)/results_{coord}.txt (Raw), results_{coord}_stat.txt (Stat)\n\n"
+                    "- **Reward**: Survival probability sum\n- **Time**: Elapsed time\n- **PDR**\n- **w.o.G**: Excluding Green"
+                )
 
             wide, long_df = (pd.DataFrame(), pd.DataFrame())
             if spath and os.path.exists(spath):
@@ -2541,7 +2519,7 @@ with tabs[2]:
                 })
                 st.dataframe(display, width='stretch')
 
-                st.markdown("#### 🏆 Scenario Ranking (Sort by)")
+                st.markdown("#### Scenario Ranking (Sort by)")
                 crit = st.selectbox("Sort by", ["Reward (desc)","PDR (asc)","Time (asc)"], index=0)
                 if crit == "Reward (desc)":
                     df_sorted = wide.sort_values("M1_mean", ascending=False)
@@ -2557,8 +2535,9 @@ with tabs[2]:
                 st.info("STAT summary file not found or empty.")
 
 
-            # ── ANOVA Suite (when raw file exists)
-            st.markdown("#### 🧪 ANOVA (One-way / RCBD / Reduced Factorial)")
+            # -- ANOVA Suite sub-tab --
+            with analytics_tabs[2]:
+              st.markdown("#### ANOVA (One-way / RCBD / Reduced Factorial)")
 
             import itertools
 
@@ -2616,8 +2595,8 @@ with tabs[2]:
                     return float(default)
 
 
-            def games_howell_fallback(df, grp, yvar, alpha=0.05):
-                """Approximate with Welch t + Holm when pingouin is unavailable."""
+            def welch_holm_posthoc(df, grp, yvar, alpha=0.05):
+                """Pairwise Welch t-tests with Holm correction (used when pingouin is unavailable)."""
                 from scipy import stats as sps
                 pairs, pvals = [], []
                 for g1, g2 in itertools.combinations(sorted(df[grp].unique()), 2):
@@ -2682,54 +2661,133 @@ with tabs[2]:
 
             def cld_from_pairs(means: pd.Series, pair_tbl: pd.DataFrame, alpha=0.05):
                 """
-                Monotone CLD: traverse sorted means top-to-bottom,
-                assign same letter only when all current group members are 'not significant'.
-                Move to next letter if any pair is 'significant'.
-                - means: index=group name (rule), values=mean on same scale as post-hoc
-                        (for RCBD, sort by y_adj mean recommended; see application below)
+                Compact Letter Display based on the absorption algorithm
+                (Piepho 2004, "An algorithm for a letter-based representation
+                of all pairwise comparisons").
+
+                Each group may receive multiple letters (e.g. "ab"). Two groups
+                sharing at least one letter are NOT significantly different.
+                Groups sharing NO letters ARE significantly different.
+
+                - means: index=group name, values=mean (pre-sorted by caller)
                 - pair_tbl: must contain ['group1','group2'] and ['reject'] or ['p-adj']
-                Result: single letter (A,B,C,...) per group -- prevents zigzag, ensures interval-type grouping.
+                Returns DataFrame with columns [rule, mean, CLD].
                 """
-                # If empty table, assign all A
+                # If empty table, assign all 'a'
                 if pair_tbl is None or pair_tbl.empty or len(means) <= 1:
-                    return pd.DataFrame({"rule": means.index, "mean": means.values, "CLD": ["A"]*len(means)})
+                    return pd.DataFrame({"rule": means.index, "mean": means.values, "CLD": ["a"]*len(means)})
 
                 ph = pair_tbl.copy()
-                # Calculate non-significance status
                 if "reject" in ph.columns:
-                    ph["ns"] = ~ph["reject"].astype(bool)
+                    ph["sig"] = ph["reject"].astype(bool)
                 else:
-                    ph["ns"] = ph["p-adj"] >= alpha
+                    ph["sig"] = ph["p-adj"] < alpha
 
-                # Fast lookup dict: (a,b)->non-significant(True/False), missing info treated conservatively as 'significant'
-                key = lambda a,b: tuple(sorted((a,b)))
-                ns_map = { key(r["group1"], r["group2"]): bool(r["ns"]) for _, r in ph.iterrows() }
+                # Significant pairs set (sorted tuples)
+                _key = lambda a, b: tuple(sorted((a, b)))
+                sig_pairs = set()
+                for _, r in ph.iterrows():
+                    if bool(r["sig"]):
+                        sig_pairs.add(_key(r["group1"], r["group2"]))
 
-                ordered = list(means.index)  # assumes already sorted externally
-                def is_ns(a, b):
-                    return ns_map.get(key(a,b), False)  # missing info treated as False(=significant) to prevent excessive merging
+                ordered = list(means.index)
+                n = len(ordered)
 
-                letters = {}
-                current_letter = "A"
-                current_members = [ordered[0]]
-                letters[ordered[0]] = current_letter
+                # --- Absorption algorithm ---
+                # Start: single letter 'a' assigned to all groups
+                # Each letter defines a "family" of groups that are mutually non-significant.
+                # If a family contains a significant pair, split it by removing one member
+                # and assigning a new letter.
 
-                for g in ordered[1:]:
-                    # Keep same letter if non-significant with all current group members
-                    if all(is_ns(g, m) for m in current_members):
-                        letters[g] = current_letter
-                        current_members.append(g)
-                    else:
-                        # Advance to next letter (monotone increase)
-                        nxt = ord(current_letter) + 1
-                        current_letter = chr(nxt) if nxt <= ord('Z') else current_letter  # keep Z if exceeded
-                        letters[g] = current_letter
-                        current_members = [g]
+                # Initial: one family containing all groups
+                families = [set(ordered)]  # list of sets
+
+                changed = True
+                max_iter = n * 26  # safety limit
+                iteration = 0
+                while changed and iteration < max_iter:
+                    changed = False
+                    iteration += 1
+                    new_families = []
+                    for fam in families:
+                        # Check if this family contains any significant pair
+                        has_sig = False
+                        for a_grp in fam:
+                            for b_grp in fam:
+                                if a_grp < b_grp and _key(a_grp, b_grp) in sig_pairs:
+                                    has_sig = True
+                                    break
+                            if has_sig:
+                                break
+
+                        if not has_sig:
+                            new_families.append(fam)
+                        else:
+                            # Split: find the member whose removal resolves the most conflicts
+                            best_remove = None
+                            best_conflicts = -1
+                            for candidate in fam:
+                                conflicts = sum(
+                                    1 for other in fam
+                                    if other != candidate and _key(candidate, other) in sig_pairs
+                                )
+                                if conflicts > best_conflicts:
+                                    best_conflicts = conflicts
+                                    best_remove = candidate
+
+                            # Keep family without the removed member
+                            remaining = fam - {best_remove}
+                            if remaining:
+                                new_families.append(remaining)
+                            # New family: the removed member + all non-significant partners from original
+                            new_fam = {best_remove}
+                            for other in fam:
+                                if other != best_remove and _key(best_remove, other) not in sig_pairs:
+                                    new_fam.add(other)
+                            new_families.append(new_fam)
+                            changed = True
+
+                    # Deduplicate families (same set of members)
+                    unique = []
+                    seen = set()
+                    for fam in new_families:
+                        key_frozen = frozenset(fam)
+                        if key_frozen not in seen:
+                            seen.add(key_frozen)
+                            unique.append(fam)
+                    families = unique
+
+                # Absorb: remove families that are subsets of other families
+                families.sort(key=len, reverse=True)
+                absorbed = []
+                for i, fam in enumerate(families):
+                    is_subset = False
+                    for j, other in enumerate(absorbed):
+                        if fam.issubset(other):
+                            is_subset = True
+                            break
+                    if not is_subset:
+                        absorbed.append(fam)
+                families = absorbed
+
+                # Assign letters (a, b, c, ...) to families, sorted by best mean
+                def family_rank(fam):
+                    # rank by the best (first in ordered list) member
+                    return min(ordered.index(g) for g in fam)
+                families.sort(key=family_rank)
+
+                letters_list = [chr(ord('a') + i) if i < 26 else chr(ord('a') + i - 26).upper()
+                                for i in range(len(families))]
+
+                group_letters = {g: [] for g in ordered}
+                for letter, fam in zip(letters_list, families):
+                    for g in fam:
+                        group_letters[g].append(letter)
 
                 return pd.DataFrame({
                     "rule": ordered,
                     "mean": [means[g] for g in ordered],
-                    "CLD":  [letters[g] for g in ordered],
+                    "CLD":  ["".join(group_letters[g]) for g in ordered],
                 })
             def _series_1d(obj) -> pd.Series:
                 """Force any input (DataFrame/Series/ndarray/list) to 1D Series(float)."""
@@ -2784,6 +2842,8 @@ with tabs[2]:
 
                         mode = st.radio("Analysis Type", ["One-way (rule only)","One-way + Block(run) (RCBD recommended)","Reduced Factorial (main + 2-way)"],
                                         index=1, horizontal=True)
+                        if "Block" in mode or "Factorial" in mode:
+                            st.caption("RCBD assumes Common Random Numbers (CRN): all 64 rules within each run share the same random seed, so `run` is a valid block variable.")
 
                         if not HAS_SM:
                             st.warning("statsmodels not installed. Cannot run ANOVA. `pip install statsmodels` and retry.")
@@ -2800,12 +2860,12 @@ with tabs[2]:
                                 formula = f"{yvar} ~ C(rule) + C(run)"
                                 st.caption("Model: value ~ C(rule) + C(run)  (run=block)")
                             else:
-                                # Reduced factorial: main effects + 2-way interactions only (no 3/4-way)
-                                formula = (f"{yvar} ~ C(Phase) + C(RedPolicy) + C(RedAction) + C(YellowAction)"
+                                # Reduced factorial: main effects + 2-way interactions + block(run)
+                                formula = (f"{yvar} ~ C(run) + C(Phase) + C(RedPolicy) + C(RedAction) + C(YellowAction)"
                                            " + C(Phase):C(RedPolicy) + C(Phase):C(RedAction) + C(Phase):C(YellowAction)"
                                            " + C(RedPolicy):C(RedAction) + C(RedPolicy):C(YellowAction)"
                                            " + C(RedAction):C(YellowAction)")
-                                st.caption("Model: main effects + all 2-way interactions (3/4-way excluded for power)")
+                                st.caption("Model: C(run) + main effects + all 2-way interactions (3/4-way excluded for power)")
 
                             model = smf.ols(formula, data=d).fit()
                             anova_tbl = sm.stats.anova_lm(model, typ=2)
@@ -2818,7 +2878,7 @@ with tabs[2]:
                             alpha = st.slider("Significance Level (alpha)", 0.001, 0.1, 0.05, 0.001)
                             sig = out[(out.index!="Total") & (out["PR(>F)"] < alpha)].sort_values("PR(>F)")
                             if not sig.empty:
-                                st.markdown("##### 📌 Interpretation Summary")
+                                st.markdown("##### Interpretation Summary")
                                 lines = []
                                 for idx, r in sig.iterrows():
                                     omega = f", ω²={r['omega_sq']:.3f}" if pd.notna(r.get('omega_sq')) else ""
@@ -2889,21 +2949,9 @@ with tabs[2]:
                             st.altair_chart(rvf_chart + zero_line, width='stretch')
                         
 
-                            # Homogeneity of variance (by rule). For RCBD, test with block-residualized values
-                            try:
-                                if mode.startswith("One-way"):
-                                    df_lev = d
-                                else:
-                                    df_lev = block_adjust(d, yvar, block_col="run").rename(columns={"y_adj": yvar})
-                                groups = [g[yvar].values for _, g in df_lev.groupby("rule")]
-                                p_lev = sps.levene(*groups, center="median").pvalue
-                                st.write(f"Levene(Brown–Forsythe): p={p_lev:.3g}")
-                            except Exception:
-                                p_lev = np.nan
-
-                            # Added right after p_shap, p_lev computation
-                            p_shap = _scalar(p_shap, default=1.0)  # on failure, default to 'normality pass'
-                            p_lev  = _scalar(p_lev,  default=np.nan)
+                            # p_shap scalar fix (Levene computed once in post-hoc section below)
+                            p_shap = _scalar(p_shap, default=1.0)
+                            p_lev  = np.nan  # computed in post-hoc section below
                             alpha  = _scalar(alpha,  default=0.05)
 
                             # ===== Post-hoc tests & CLD =====
@@ -2914,49 +2962,99 @@ with tabs[2]:
                                 # Time, PDR(incl. woG)=smaller is better / Reward types=larger is better
                                 return (m == "Time") or m.startswith("PDR")
 
-                            # --- Finalize post-hoc input and CLD mean (Series) ---
+                            # --- EMM-based post-hoc for RCBD; Games-Howell for One-way ---
+                            def _emm_pairwise(model_obj, data, rule_col, block_col, yvar, alpha_val):
+                                """
+                                Estimated Marginal Means (EMM) pairwise comparison.
+                                Uses RCBD model's MS_residual as the pooled error term.
+                                Pairwise differences tested with t-distribution, Holm-corrected.
+                                """
+                                ms_res = model_obj.mse_resid
+                                df_res = model_obj.df_resid
+                                rules = sorted(data[rule_col].unique())
+                                n_per_cell = data.groupby(rule_col).size()
+
+                                # EMM = marginal mean of each rule (averaged over blocks)
+                                emm = data.groupby(rule_col)[yvar].mean()
+
+                                pairs, pvals, diffs = [], [], []
+                                for g1, g2 in itertools.combinations(rules, 2):
+                                    diff = emm[g1] - emm[g2]
+                                    n1, n2 = n_per_cell[g1], n_per_cell[g2]
+                                    se = np.sqrt(ms_res * (1.0/n1 + 1.0/n2))
+                                    t_stat = diff / se if se > 0 else 0
+                                    p_val = 2.0 * (1.0 - sps.t.cdf(abs(t_stat), df_res))
+                                    pairs.append((g1, g2))
+                                    pvals.append(p_val)
+                                    diffs.append(diff)
+
+                                from statsmodels.stats.multitest import multipletests
+                                reject, p_adj, _, _ = multipletests(pvals, method="holm", alpha=alpha_val)
+                                ph = pd.DataFrame({
+                                    "group1": [p[0] for p in pairs],
+                                    "group2": [p[1] for p in pairs],
+                                    "diff": diffs,
+                                    "p-adj": p_adj,
+                                    "reject": reject,
+                                })
+                                return ph, emm
+
                             if mode == "One-way + Block(run) (RCBD recommended)":
-                                dd = block_adjust(d, yvar, block_col="run").rename(columns={"y_adj": yvar})
-                                dd_work = _make_dd_work(dd, yvar)               # ensure analysis column '__y__' is 1D
-                                y_post  = dd_work["__y__"]
-                                grp_post= dd_work["rule"]
-                                means_for_cld = _means_series(dd_work, "rule", "__y__").sort_values(
-                                    ascending=_small_is_better(metric)
-                                )
-                                # Levene also based on dd_work (safer)
-                                lev_groups = [g["__y__"].values for _, g in dd_work.groupby("rule")]
+                                # EMM-based pairwise comparison using RCBD model error
+                                try:
+                                    posthoc, emm_means = _emm_pairwise(model, d, "rule", "run", yvar, alpha)
+                                    means_for_cld = emm_means.sort_values(ascending=_small_is_better(metric))
+                                    explain = "EMM pairwise t-tests (RCBD MS_residual) + Holm correction"
+                                except Exception as e_emm:
+                                    # Fallback to block-adjusted Games-Howell
+                                    dd = block_adjust(d, yvar, block_col="run").rename(columns={"y_adj": yvar})
+                                    dd_work = _make_dd_work(dd, yvar)
+                                    means_for_cld = _means_series(dd_work, "rule", "__y__").sort_values(
+                                        ascending=_small_is_better(metric))
+                                    try:
+                                        import pingouin as pg
+                                        gh = pg.pairwise_gameshowell(dv="__y__", between="rule", data=dd_work)
+                                        posthoc = gh.rename(columns={"A":"group1","B":"group2","pval":"p-adj"})
+                                        posthoc["reject"] = posthoc["p-adj"] < alpha
+                                        explain = f"Games-Howell on block-adjusted y* (EMM failed: {e_emm})"
+                                    except Exception:
+                                        y_post = dd_work["__y__"]; grp_post = dd_work["rule"]
+                                        posthoc = welch_holm_posthoc(
+                                            pd.DataFrame({"rule": grp_post.values, "y": y_post.values}),
+                                            "rule", "y", alpha=alpha)
+                                        explain = f"Welch t + Holm on block-adjusted y* (EMM failed: {e_emm})"
+                                # Levene on block-adjusted residuals
+                                dd_lev = block_adjust(d, yvar, block_col="run").rename(columns={"y_adj": yvar})
+                                dd_lev_work = _make_dd_work(dd_lev, yvar)
+                                lev_groups = [g["__y__"].values for _, g in dd_lev_work.groupby("rule")]
                             else:
-                                dd_work = _make_dd_work(d, yvar)                # ensure 1D for One-way as well
+                                # One-way: Games-Howell (robust to unequal variance)
+                                dd_work = _make_dd_work(d, yvar)
                                 y_post  = dd_work["__y__"]
                                 grp_post= dd_work["rule"]
                                 means_for_cld = _means_series(dd_work, "rule", "__y__").sort_values(
-                                    ascending=_small_is_better(metric)
-                                )
+                                    ascending=_small_is_better(metric))
                                 lev_groups = [g["__y__"].values for _, g in dd_work.groupby("rule")]
+                                try:
+                                    import pingouin as pg
+                                    gh = pg.pairwise_gameshowell(dv="__y__", between="rule", data=dd_work)
+                                    posthoc = gh.rename(columns={"A":"group1","B":"group2","pval":"p-adj"})
+                                    posthoc["reject"] = posthoc["p-adj"] < alpha
+                                    explain = "Games-Howell"
+                                except Exception:
+                                    posthoc = welch_holm_posthoc(
+                                        pd.DataFrame({"rule": grp_post.values, "y": y_post.values}),
+                                        "rule", "y", alpha=alpha)
+                                    explain = "Pairwise Welch t-tests + Holm correction (pingouin unavailable)"
 
                             try:
                                 if len(lev_groups) >= 2 and all(len(x) > 1 for x in lev_groups):
                                     p_lev = sps.levene(*lev_groups, center="median").pvalue
                                 else:
                                     p_lev = np.nan
-                                st.write(f"Levene(Brown–Forsythe): p={_scalar(p_lev):.3g}")
+                                st.write(f"Levene(Brown-Forsythe): p={_scalar(p_lev):.3g}")
                             except Exception:
                                 p_lev = np.nan
-
-
-                            # --- Post-hoc: Games-Howell (robust to non-normality & heteroscedasticity) ---
-                            try:
-                                import pingouin as pg
-                                gh = pg.pairwise_gameshowell(dv="__y__", between="rule", data=dd_work)
-                                posthoc = gh.rename(columns={"A":"group1","B":"group2","pval":"p-adj"})
-                                posthoc["reject"] = posthoc["p-adj"] < alpha
-                                explain = "Games–Howell"
-                            except Exception:
-                                posthoc = games_howell_fallback(
-                                    pd.DataFrame({"rule": grp_post.values, "y": y_post.values}),
-                                    "rule", "y", alpha=alpha
-                                )
-                                explain = "Welch t-tests + Holm correction (Games–Howell fallback)"
 
                             # --- Output results & CLD ---
                             if not posthoc.empty:
@@ -2968,18 +3066,18 @@ with tabs[2]:
                                     st.info("No p-value information available for CLD.")
                                 else:
                                     cld = cld_from_pairs(means_for_cld, ph, alpha=alpha)
-                                    st.markdown("##### CLD (same letter = no significant difference, A = best)")
-                                    st.caption("⚠️ CLD uses a greedy monotone algorithm; letter assignments may vary with group ordering. "
-                                               "Interpret letters as approximate groupings — always check pairwise p-values for precise conclusions.")
+                                    st.markdown("##### CLD (shared letter = no significant difference, 'a' = best)")
+                                    st.caption("CLD uses the absorption algorithm (Piepho 2004). Groups may have multiple letters (e.g. 'ab'). "
+                                               "Two groups sharing at least one letter are not significantly different.")
                                     st.dataframe(cld, width='stretch')
 
                                     # Top candidates (‘A’ group) -- sorted by metric direction
-                                    st.markdown(f"#### ✅ Top Candidates (**{metric}, A=Best**)")
-                                    top = cld[cld["CLD"]=="A"].sort_values("mean", ascending=_small_is_better(metric))
+                                    st.markdown(f"#### Top Candidates (**{metric}**, groups containing letter 'a')")
+                                    top = cld[cld["CLD"].str.contains("a", na=False)].sort_values("mean", ascending=_small_is_better(metric))
                                     st.dataframe(top, width='stretch')
 
                                     # ================== A-Group Intersection (Reward, Time, PDR, RCBD-based) ==================
-                                    st.markdown("### 🔗 A-Group Intersection (Reward ∩ Time(asc) ∩ PDR(asc), RCBD)")
+                                    st.markdown("### A-Group Intersection (Reward ∩ Time(asc) ∩ PDR(asc), RCBD)")
 
                                     def _prep_metric(dfraw_all: pd.DataFrame, metric_name: str):
                                         """Extract metric rows from raw(long) + fix rule column."""
@@ -3006,37 +3104,42 @@ with tabs[2]:
 
                                     def _rcbd_posthoc_cld(d: pd.DataFrame, yvar: str, alpha: float = 0.05, prefer_small_is_A: bool = False):
                                         """
-                                        RCBD: y ~ C(rule) + C(run), then Games-Howell on block-adjusted y*.
-                                        CLD via cld_from_pairs (monotone letter algorithm).
-                                        prefer_small_is_A=True  → ascending sort (A = smallest = Best)
-                                        prefer_small_is_A=False → descending sort (A = largest = Best)
+                                        RCBD: y ~ C(rule) + C(run), EMM-based pairwise t-tests using
+                                        the model's MS_residual as pooled error, Holm-corrected.
+                                        CLD via absorption algorithm (Piepho 2004).
+                                        prefer_small_is_A=True  -> ascending sort (a = smallest = Best)
+                                        prefer_small_is_A=False -> descending sort (a = largest = Best)
                                         """
                                         from scipy import stats as sps
 
                                         posthoc = pd.DataFrame()
                                         explain = ""
 
-                                        # --- Block-adjust y* for post-hoc input (1D guaranteed)
-                                        dd = block_adjust(d, yvar, block_col="run").rename(columns={"y_adj": yvar})
-                                        dd_work = _make_dd_work(dd, yvar)
-                                        y_post, grp_post = dd_work["__y__"], dd_work["rule"]
-                                        means_for_cld = _means_series(dd_work, "rule", "__y__").sort_values(
-                                            ascending=prefer_small_is_A
-                                        )
-
-                                        # --- Post-hoc: Games-Howell (robust to non-normality & heteroscedasticity)
+                                        # Fit RCBD model for this metric
                                         try:
-                                            import pingouin as pg
-                                            gh = pg.pairwise_gameshowell(dv="__y__", between="rule", data=dd_work)
-                                            posthoc = gh.rename(columns={"A":"group1","B":"group2","pval":"p-adj"})
-                                            posthoc["reject"] = posthoc["p-adj"] < alpha
-                                            explain = "Games–Howell (RCBD, y*)"
-                                        except Exception:
-                                            posthoc = games_howell_fallback(
-                                                pd.DataFrame({"rule": grp_post.values, "y": y_post.values}),
-                                                "rule", "y", alpha=alpha
-                                            )
-                                            explain = "Welch t-tests + Holm correction (RCBD, y*)"
+                                            rcbd_model = smf.ols(f"{yvar} ~ C(rule) + C(run)", data=d).fit()
+                                            posthoc_emm, emm_means = _emm_pairwise(rcbd_model, d, "rule", "run", yvar, alpha)
+                                            posthoc = posthoc_emm
+                                            means_for_cld = emm_means.sort_values(ascending=prefer_small_is_A)
+                                            explain = "EMM pairwise t-tests (RCBD MS_residual) + Holm"
+                                        except Exception as e_emm:
+                                            # Fallback: block-adjusted Games-Howell
+                                            dd = block_adjust(d, yvar, block_col="run").rename(columns={"y_adj": yvar})
+                                            dd_work = _make_dd_work(dd, yvar)
+                                            means_for_cld = _means_series(dd_work, "rule", "__y__").sort_values(
+                                                ascending=prefer_small_is_A)
+                                            try:
+                                                import pingouin as pg
+                                                gh = pg.pairwise_gameshowell(dv="__y__", between="rule", data=dd_work)
+                                                posthoc = gh.rename(columns={"A":"group1","B":"group2","pval":"p-adj"})
+                                                posthoc["reject"] = posthoc["p-adj"] < alpha
+                                                explain = f"Games-Howell block-adjusted (EMM failed: {e_emm})"
+                                            except Exception:
+                                                y_post = dd_work["__y__"]; grp_post = dd_work["rule"]
+                                                posthoc = welch_holm_posthoc(
+                                                    pd.DataFrame({"rule": grp_post.values, "y": y_post.values}),
+                                                    "rule", "y", alpha=alpha)
+                                                explain = f"Welch t + Holm block-adjusted (EMM failed: {e_emm})"
 
                                         # --- CLD computation
                                         if posthoc.empty or (("p-adj" not in posthoc.columns) and ("reject" not in posthoc.columns)):
@@ -3045,7 +3148,7 @@ with tabs[2]:
                                         cld = cld_from_pairs(means_for_cld, posthoc, alpha=alpha)
                                         return means_for_cld, cld, explain
 
-                                    with st.expander("🔍 A-Group Intersection (Reward↑, Time↓, PDR↓)", expanded=True):
+                                    with st.expander("A-Group Intersection (Reward up, Time down, PDR down)", expanded=True):
                                         alpha_int = st.slider("Alpha for intersection", 0.001, 0.1, 0.05, 0.001, key="alpha_intersect_all")
                                         alpha_int = float(alpha_int)   # scalar from slider value
                                         # --- Reward (larger = A) ---
@@ -3056,7 +3159,7 @@ with tabs[2]:
                                         else:
                                             d_rew_tr, y_rew, _ = _transform_for_metric(d_rew, "Reward")
                                             means_rew, cld_rew, _ = _rcbd_posthoc_cld(d_rew_tr, y_rew, alpha=alpha_int, prefer_small_is_A=False)
-                                            A_rew = set(cld_rew.loc[cld_rew["CLD"]=="A","rule"]) if not cld_rew.empty else set()
+                                            A_rew = set(cld_rew.loc[cld_rew["CLD"].str.contains("a", na=False),"rule"]) if not cld_rew.empty else set()
                                             disp_rew = d_rew.groupby("rule")["value"].mean().rename("Reward_mean(orig)")
 
                                         # --- Time (smaller = A) ---
@@ -3067,7 +3170,7 @@ with tabs[2]:
                                         else:
                                             d_time_tr, y_time, _ = _transform_for_metric(d_time, "Time")
                                             means_time, cld_time, _ = _rcbd_posthoc_cld(d_time_tr, y_time, alpha=alpha_int, prefer_small_is_A=True)
-                                            A_time = set(cld_time.loc[cld_time["CLD"]=="A","rule"]) if not cld_time.empty else set()
+                                            A_time = set(cld_time.loc[cld_time["CLD"].str.contains("a", na=False),"rule"]) if not cld_time.empty else set()
                                             disp_time = d_time.groupby("rule")["value"].mean().rename("Time_mean(orig)")
 
                                         # --- PDR (smaller = A; logit analysis, display uses original scale mean) ---
@@ -3078,7 +3181,7 @@ with tabs[2]:
                                         else:
                                             d_pdr_tr, y_pdr, _ = _transform_for_metric(d_pdr, "PDR")
                                             means_pdr, cld_pdr, _ = _rcbd_posthoc_cld(d_pdr_tr, y_pdr, alpha=alpha_int, prefer_small_is_A=True)
-                                            A_pdr = set(cld_pdr.loc[cld_pdr["CLD"]=="A","rule"]) if not cld_pdr.empty else set()
+                                            A_pdr = set(cld_pdr.loc[cld_pdr["CLD"].str.contains("a", na=False),"rule"]) if not cld_pdr.empty else set()
                                             disp_pdr = d_pdr.groupby("rule")["value"].mean().rename("PDR_mean(orig)")
 
                                         # --- Show set & intersection results ---
@@ -3126,7 +3229,7 @@ with tabs[2]:
 # Data Tables tab (edit/read separation + filename labels)
 # ------------------------------
 with tabs[3]:
-    st.subheader("🧾 CSV Tables (Edit/Save)")
+    st.subheader("CSV Tables (Edit/Save)")
     bp = st.session_state.base_path
     exp = st.session_state.selected_exp
     coord = st.session_state.selected_coord
@@ -3152,7 +3255,7 @@ with tabs[3]:
                     st.success("Save complete")
             with c2:
                 if st.button("🔄 Refresh"):
-                    st.experimental_rerun()
+                    st.rerun()
             with c3:
                 yaml_path = find_yaml_in_coord(bp, exp, coord)
                 if yaml_path and st.button("▶️ Re-run with Modified Values"):
@@ -3216,7 +3319,7 @@ if "env_txt2" not in st.session_state:
 # Rerun tab (re-run existing scenario)
 # ──────────────────────────────────────────────────────────────────────────────
 with tabs[4]:
-    st.subheader("🔄 Re-run Existing Scenario")
+    st.subheader("Re-run Existing Scenario")
     st.info("💡 This tab operates **independently** from the sidebar. Select an existing scenario to modify parameters and re-run.")
 
     # ─────────────────────────────────────────────────────────────────
@@ -3230,7 +3333,7 @@ with tabs[4]:
 
 
     st.markdown("---")
-    st.markdown("### 📁 Project Path Setup")
+    st.markdown("### Project Path Setup")
 
     col_path, col_btn = st.columns([4, 1])
     with col_path:
@@ -3327,16 +3430,16 @@ with tabs[4]:
             # Display current settings
             # ─────────────────────────────────────────────────────────────────
             st.markdown("---")
-            st.markdown("### ⚙️ Current Config")
+            st.markdown("### Current Config")
 
-            with st.expander("📋 View Current Scenario Config", expanded=False):
+            with st.expander("View Current Scenario Config", expanded=False):
                 st.json(yaml_data_rerun)
 
             # ─────────────────────────────────────────────────────────────────
             # Parameter editing UI
             # ─────────────────────────────────────────────────────────────────
             st.markdown("---")
-            st.markdown("### 🔧 Edit Parameters")
+            st.markdown("### Edit Parameters")
             st.caption("⚠️ Changing departure time, incident size, or coordinates requires scenario regeneration (API re-call)")
 
             col1, col2 = st.columns(2)

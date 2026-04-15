@@ -355,12 +355,24 @@ The dashboard opens at `http://localhost:8501`.
 - Multi-select for displayed routes (limit to prevent rendering slowdown)
 
 #### Analytics Tab
-- **RAW results table**: Per-run values for each metric
-- **STAT summary**: Mean, StdDev, 95% CI for all 64 scenarios
-- **Scenario ranking**: Sort by Reward (desc), PDR (asc), or Time (asc)
-- **ANOVA suite**: Full Factorial, One-way, RCBD analysis
-- **Post-hoc tests**: Tukey HSD, Games-Howell
-- **Residual diagnostics**: Shapiro-Wilk normality test, QQ plot, histogram
+
+Organized into three sub-tabs: **RAW Data**, **STAT Summary**, and **ANOVA Suite**.
+
+- **RAW Data**: Per-run values for each metric (Reward, Time, PDR, Reward w.o.G, PDR w.o.G)
+- **STAT Summary**: Mean, StdDev, 95% CI for all scenarios + Scenario Ranking (sort by Reward↓, PDR↑, Time↑)
+- **ANOVA Suite**:
+  - **Models**: One-way (`value ~ C(rule)`), RCBD (`value ~ C(rule) + C(run)`), Reduced Factorial (main + 2-way interactions + block)
+  - **CRN Assumption**: RCBD and Factorial modes assume Common Random Numbers — all 64 rules within each run share the same random seed, making `run` a valid block variable
+  - **Post-hoc tests**:
+    - RCBD/Factorial: **EMM (Estimated Marginal Means)** pairwise t-tests using the model's MS_residual as pooled error, Holm-corrected
+    - One-way: Games-Howell (robust to unequal variances)
+    - Fallback: Pairwise Welch t-tests + Holm correction (when pingouin is unavailable)
+  - **CLD (Compact Letter Display)**: Absorption algorithm (Piepho 2004) — groups may receive multiple letters (e.g. "ab"); two groups sharing at least one letter are not significantly different
+  - **Effect sizes**: η² (eta-squared) and ω² (omega-squared, bias-corrected)
+  - **Residual diagnostics**: Shapiro-Wilk + Anderson-Darling normality, QQ plot, histogram, Residuals vs Fitted
+  - **Homoscedasticity**: Levene test (Brown-Forsythe variant, center=median)
+  - **RCBD additivity**: Tukey 1-df non-additivity test
+  - **A-Group Intersection**: Identifies scenarios in the best CLD group (letter 'a') across Reward↑, Time↓, and PDR↓ simultaneously
 
 #### Data Tables Tab
 - View and edit scenario CSV files directly
