@@ -199,6 +199,9 @@ python src/sce_src/make_csv_yaml_dynamic.py \
 
 # Step 2: Run simulation
 python src/sim_src/main.py --config_path scenarios/exp_.../config_(lat,lon).yaml
+
+# Step 2 (optional): Run with trace logging for per-patient timeline
+python src/sim_src/main.py --config_path scenarios/exp_.../config_(lat,lon).yaml --trace
 ```
 
 ---
@@ -315,7 +318,26 @@ For each rule (64 total) x each sample (N repetitions):
 4. Calculate survival probability based on elapsed time
 5. Record metrics: Reward, Time, PDR, Reward_woG, PDR_woG
 
-### 7.4 Diversion Rule
+### 7.4 Trace Logging
+
+Run with `--trace` to generate per-patient event traces:
+```bash
+python main.py --config_path config.yaml --trace
+```
+
+Produces `trace_{exp_indicator}.json` containing detailed event records:
+- `onset`: patient generation with severity distribution
+- `rescue`: individual patient rescue
+- `transport_start`: AMB/UAV transport initiation (patient, vehicle, hospital)
+- `hospital_arrival`: patient arrival at hospital (admitted or diverted)
+- `diversion`: patient redirected to another hospital
+- `care_start`: treatment begins
+- `care_complete`: treatment finished
+
+Each record includes `time`, `event`, `patient_id`, `severity`, and context-specific fields.
+Used by the dashboard's Simulation Trace Replay feature (Scenarios tab).
+
+### 7.5 Diversion Rule
 
 When a hospital reaches capacity, patients are diverted:
 - AMB patients: transferred to nearest available hospital (any tier matching patient severity)
@@ -345,8 +367,15 @@ The dashboard opens at `http://localhost:8501`.
 - **Experiment logs viewer**: Filter by coordinate
 - **Patient timeline**: Rescue time, transport vehicle, hospital, arrival, treatment completion
 - **Event table**: Full event log with Rule/Iteration filter
+- **Patient Story Animation**: Animated bar chart of patient state transitions over time (Waiting → Rescued → Transport → Hospital → Completed); Play/Pause/slider controls
+- **Simulation Trace Replay**: Per-patient Gantt chart from `--trace` output (requires trace_*.json)
+  - Timeline from rescue through transport, hospital arrival, treatment, and completion
+  - Color-coded by severity (Red/Yellow/Green/Black)
+  - Event summary: Rescues, Transports, Arrivals, Diversions, Completed
 
 #### Maps Tab
+
+**Static Map mode** (default):
 - **Interactive Folium map** with route visualization
 - **Ambulance routes**: Fire station -> Incident site (purple), Incident site -> Hospital (teal)
 - **UAV routes**: Helipad hospital -> Incident site (dispatch), Incident site -> Hospital (transport)
@@ -354,9 +383,21 @@ The dashboard opens at `http://localhost:8501`.
 - **Route info popups**: Distance (km), duration (min)
 - Multi-select for displayed routes (limit to prevent rendering slowdown)
 
+**Animation mode** (simulation log-based):
+- Select simulation log file (scenario generation logs automatically filtered out)
+- Choose Rule and Iteration to replay
+- **Emoji markers on map**: 🚑 AMB, 🚁 UAV, 🛑 Waiting patient, 🏥 In treatment, ✅ Completed
+- **Road-following movement**: Vehicles move along actual route JSON polylines (Kakao/OSRM)
+- **Patient carrying indicator**: Red glow effect + 🧑‍⚕️ overlay when transporting a patient
+- **Directional emoji**: Emoji flips horizontally based on movement direction (west = flip)
+- **Patient click popup**: Click any patient marker to view transport vehicle, hospital name, ER wait (handover) time, treatment time, and total hospital stay
+- **Control bar** (below map, outside legend area): Play/Pause, Replay, time slider, time display
+- Full zoom/pan support during playback
+- Frame count adjustable via slider (30-300 frames)
+
 #### Analytics Tab
 
-Organized into three sub-tabs: **RAW Data**, **STAT Summary**, and **ANOVA Suite**.
+Organized into seven sub-tabs: **RAW Data** | **STAT Summary** | **ANOVA Suite** | **Pareto Dominance** | **Bootstrap / Non-Parametric** | **Power Analysis** | **Export**.
 
 - **RAW Data**: Per-run values for each metric (Reward, Time, PDR, Reward w.o.G, PDR w.o.G)
 - **STAT Summary**: Mean, StdDev, 95% CI for all scenarios + Scenario Ranking (sort by Reward↓, PDR↑, Time↑)
@@ -373,6 +414,23 @@ Organized into three sub-tabs: **RAW Data**, **STAT Summary**, and **ANOVA Suite
   - **Homoscedasticity**: Levene test (Brown-Forsythe variant, center=median)
   - **RCBD additivity**: Tukey 1-df non-additivity test
   - **A-Group Intersection**: Identifies scenarios in the best CLD group (letter 'a') across Reward↑, Time↓, and PDR↓ simultaneously
+- **Pareto Dominance** (Multi-Objective Analysis):
+  - Statistical Pareto efficiency: CLD-based dominance relation between rules
+  - Non-dominated sorting (Pareto Layers): Layer 0 = optimal front
+  - 3D scatter plot (Reward × Time × PDR), color-coded by layer
+  - Dominance count table and heatmap
+- **Bootstrap / Non-Parametric** (alternatives when normality is violated):
+  - BCa Bootstrap CI: bias-corrected accelerated confidence intervals
+  - Friedman Test: non-parametric RCBD alternative + Conover post-hoc
+  - Kruskal-Wallis: non-parametric one-way alternative + Dunn post-hoc
+- **Power Analysis**:
+  - Post-hoc power based on observed η² and MSE
+  - Prospective sample size recommendation for target power
+  - Power curve plot (n vs power)
+- **Export** (publication-quality):
+  - ANOVA tables in LaTeX (APA style)
+  - CLD results as LaTeX table
+  - Combined CSV and raw data export
 
 #### Data Tables Tab
 - View and edit scenario CSV files directly
@@ -395,6 +453,13 @@ Organized into three sub-tabs: **RAW Data**, **STAT Summary**, and **ANOVA Suite
 #### Results Compare (`pages/ResultsCompare.py`)
 - Compare results across multiple coordinates
 - Side-by-side metric comparison
+- **Cross-Scenario Meta-Analysis**:
+  - Kendall's W concordance coefficient (rule ranking consistency across locations)
+  - Forest plot (grand mean ± 95% CI per rule across locations)
+  - Rule × Location interaction test (two-way ANOVA)
+  - Rule classification: Universally Good vs Location-Dependent
+  - Tornado diagram (rank variation) and factor-level sensitivity
+- **Scenario Config Diff**: Side-by-side YAML/CSV comparison between two experiments
 
 #### Batch Experiment (`pages/BatchExperiment.py`)
 - 5-step workflow: Generate Coords -> View -> Run -> Progress -> Visualize

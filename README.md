@@ -14,8 +14,8 @@ A simulation and analysis platform for **optimizing patient transport** during M
 ### Key Features
 - **Scenario Generation**: Real-time/future traffic data via Kakao Mobility API or OSRM
 - **Simulation Engine**: Evaluates 64 policy combinations using ambulances (AMB) and drones (UAV)
-- **Statistical Analysis**: Full Factorial ANOVA, EMM-based post-hoc, CLD (Piepho 2004)
-- **Visualization Dashboard**: Streamlit-based web interface
+- **Statistical Analysis**: Full Factorial ANOVA, EMM-based post-hoc, CLD (Piepho 2004), Pareto Dominance, Bootstrap CI, Power Analysis
+- **Visualization Dashboard**: Streamlit-based web interface with animated map replay
 
 ---
 
@@ -49,7 +49,7 @@ ADReSS/
 │   │   ├── main.py                       # Simulation entry point (RunManager)
 │   │   ├── ScenarioManager.py            # Scenario setup and entity initialization
 │   │   ├── EntityManager.py              # Entity state management
-│   │   ├── EventManager.py               # Event queue and simulation loop
+│   │   ├── EventManager.py               # Event queue, simulation loop, and trace logging
 │   │   ├── RuleManager.py                # Policy rule management (64 combinations)
 │   │   ├── MCIEnvironment_gymnasium.py   # Gymnasium environment wrapper
 │   │   ├── config.yaml                   # Simulation configuration template
@@ -59,7 +59,7 @@ ADReSS/
 │       ├── MCI_Streamlit.py              # Main dashboard
 │       └── pages/
 │           ├── Generate.py               # Scenario generation UI
-│           ├── ResultsCompare.py         # Results comparison page
+│           ├── ResultsCompare.py         # Results comparison + cross-scenario meta-analysis
 │           └── BatchExperiment.py        # Batch experiment dashboard (5-step workflow)
 │
 ├── scenarios/                             # Scenario data
@@ -86,7 +86,8 @@ ADReSS/
 │   └── exp_{base}_dep_{HHMM}/ or exp_{base}_osrm/
 │       └── (lat,lon)/
 │           ├── results_(lat,lon).txt      # RAW results (full data)
-│           └── results_(lat,lon)_stat.txt # Statistical summary
+│           ├── results_(lat,lon)_stat.txt # Statistical summary
+│           └── trace_(lat,lon).json       # Per-patient trace log (when --trace enabled)
 │
 ├── experiment_logs/                       # Execution logs
 │   └── (lat,lon)_YYYYMMDD_HHMMSS.txt
@@ -678,19 +679,36 @@ streamlit run pages/Generate.py
 - **Iteration selection**: Choose from iteration count
 - **Patient summary table**: Rescue time → Transport mode → Hospital → Arrival time → Treatment complete
 - **Event table**: Full simulation event timeline
+- **Patient Story Animation**: Animated bar chart of patient state transitions over time (Waiting → Rescued → Transport → Hospital → Completed)
+- **Simulation Trace Replay**: Per-patient Gantt chart from `--trace` output (trace_*.json required)
+  - Timeline: rescue → transport → hospital arrival → treatment → completion
+  - Color-coded by severity (Red/Yellow/Green/Black)
+  - Event summary statistics (Rescues, Transports, Arrivals, Diversions, Completed)
 
 #### 3. Maps Tab
-- **Theme**: Light / Dark
-- **Route display**:
-  - AMB C→S (fire station → incident site): solid line, congestion-colored
-  - AMB S→H (incident site → hospital): solid line
-  - UAV dispatch: dashed line (tertiary hospital → incident site)
-  - UAV transport: dashed line (incident site → hospital)
-- **Legend**: Congestion colors + AMB/UAV speed display
-- **Popup**: Click to show distance (km), time (min)
+- **Mode toggle**: Static Map / Animation radio button
+- **Static Map mode**:
+  - **Theme**: Light / Dark
+  - **Route display**:
+    - AMB C→S (fire station → incident site): solid line, congestion-colored
+    - AMB S→H (incident site → hospital): solid line
+    - UAV dispatch: dashed line (tertiary hospital → incident site)
+    - UAV transport: dashed line (incident site → hospital)
+  - **Legend**: Congestion colors + AMB/UAV speed display
+  - **Popup**: Click to show distance (km), time (min)
+- **Animation mode** (simulation log-based):
+  - Simulation log file selection (scenario generation logs automatically filtered out)
+  - Rule/Iteration selection
+  - **Emoji markers**: 🚑 AMB, 🚁 UAV, 🛑 Waiting patient, 🏥 In treatment, ✅ Completed
+  - **Road-following movement**: Vehicles move along actual route JSON polylines (Kakao/OSRM)
+  - **Patient carrying indicator**: Red glow + 🧑‍⚕️ overlay when transporting a patient
+  - **Directional emoji**: Emoji flips horizontally based on movement direction
+  - **Patient click popup**: Click any patient marker to view transport vehicle, hospital name, ER wait (handover) time, treatment time, and total hospital stay
+  - **Control bar** (below map): Play/Pause, Replay, time slider, time display
+  - Full zoom/pan support during playback
 
 #### 4. Analytics Tab
-- **Sub-tab structure**: RAW Data | STAT Summary | ANOVA Suite
+- **Sub-tab structure**: RAW Data | STAT Summary | ANOVA Suite | Pareto Dominance | Bootstrap / Non-Parametric | Power Analysis | Export
 - **Metric selection**: Reward, Time, PDR, Reward w.o.G, PDR w.o.G
 - **Sort criteria**: Reward↓, PDR↑, Time↑
 - **ANOVA design**:
@@ -709,6 +727,23 @@ streamlit run pages/Generate.py
 - **RCBD additivity**: Tukey 1-df non-additivity test
 - **A-group intersection**: Recommend scenarios containing letter 'a' across Reward↑ ∩ Time↓ ∩ PDR↓
 - **CRN assumption**: RCBD/Factorial modes assume all 64 rules within each run share the same random seed
+- **Pareto Dominance** (Multi-Objective Analysis):
+  - Statistical Pareto efficiency: CLD-based dominance relation between rules
+  - Non-dominated sorting (Pareto Layers): Layer 0 = optimal front
+  - 3D scatter plot (Reward × Time × PDR), color-coded by layer
+  - Dominance count table (number of rules dominated / dominated-by per rule)
+- **Bootstrap / Non-Parametric** (alternatives when normality is violated):
+  - BCa Bootstrap CI (scipy.stats.bootstrap): bias-corrected accelerated confidence intervals
+  - Friedman Test: non-parametric RCBD alternative + Conover post-hoc
+  - Kruskal-Wallis: non-parametric one-way alternative + Dunn post-hoc
+- **Power Analysis**:
+  - Post-hoc power: based on observed effect size (η²) and MSE
+  - Prospective sample size: required n for target power (0.8)
+  - Power curve plot (n vs power)
+- **Export** (publication-quality):
+  - ANOVA tables in LaTeX format (APA style)
+  - CLD results as LaTeX table
+  - Full analysis bundle download (.txt)
 
 #### 5. Data Tables Tab
 - CSV file selection (filename only, path hidden)
@@ -846,6 +881,9 @@ streamlit run pages/Generate.py
 # 3. Run simulation directly (CLI)
 cd src/sim_src
 python main.py --config_path /path/to/config.yaml
+
+# 4. Run with per-patient trace logging (generates trace_*.json)
+python main.py --config_path /path/to/config.yaml --trace
 ```
 
 ### Streamlit Cloud Deployment
