@@ -1149,6 +1149,58 @@ def _offset_line(start: Tuple[float,float], end: Tuple[float,float], meters: flo
     return [(lat1+dlat, lon1+dlon), (lat2+dlat, lon2+dlon)]
 
 
+def extract_polyline(route_obj: dict) -> List[Tuple[float, float]]:
+    """Extract [lat, lon] polyline from route JSON (Kakao / OSRM)."""
+    meta = route_obj.get("meta", {})
+    api_provider = meta.get("api_provider", "")
+    latlngs: List[Tuple[float, float]] = []
+
+    if api_provider == "kakao":
+        payload = (route_obj.get("payload") or {}).get("kakao_response", {})
+        routes = payload.get("routes", [])
+        if routes:
+            for road in routes[0].get("sections", [{}])[0].get("roads", []):
+                vx = road.get("vertexes", [])
+                for i in range(0, len(vx), 2):
+                    if i + 1 < len(vx):
+                        latlngs.append((vx[i + 1], vx[i]))
+    elif api_provider == "osrm":
+        payload = (route_obj.get("payload") or {}).get("osrm_response", {})
+        routes = payload.get("routes", [])
+        if routes:
+            coords = routes[0].get("geometry", {}).get("coordinates", [])
+            latlngs = [(c[1], c[0]) for c in coords if isinstance(c, (list, tuple)) and len(c) >= 2]
+    return latlngs
+
+
+def _interpolate_along_polyline(polyline: List[Tuple[float, float]], frac: float) -> Tuple[float, float]:
+    """Interpolate position along a polyline at fraction frac (0..1)."""
+    if not polyline:
+        return (0.0, 0.0)
+    if frac <= 0:
+        return polyline[0]
+    if frac >= 1:
+        return polyline[-1]
+
+    # Compute cumulative distances
+    dists = [0.0]
+    for i in range(1, len(polyline)):
+        d = math.hypot(polyline[i][0] - polyline[i - 1][0], polyline[i][1] - polyline[i - 1][1])
+        dists.append(dists[-1] + d)
+    total = dists[-1]
+    if total == 0:
+        return polyline[0]
+
+    target = frac * total
+    for i in range(1, len(dists)):
+        if dists[i] >= target:
+            seg_frac = (target - dists[i - 1]) / (dists[i] - dists[i - 1]) if dists[i] != dists[i - 1] else 0
+            lat = polyline[i - 1][0] + seg_frac * (polyline[i][0] - polyline[i - 1][0])
+            lon = polyline[i - 1][1] + seg_frac * (polyline[i][1] - polyline[i - 1][1])
+            return (lat, lon)
+    return polyline[-1]
+
+
 def draw_uav_dash(m: folium.Map, start_latlon: Tuple[float,float], end_latlon: Tuple[float,float], color: str, tooltip: str, offset_m: float=0.0):
     pts = [start_latlon, end_latlon]
     if offset_m != 0.0:
@@ -1624,6 +1676,182 @@ with tabs[1]:
                         file_name=f"patient_timeline{_suffix}.csv"
                     )
 
+                    # ── Patient Story Animation ──
+                    st.markdown("#### Patient Story Animation")
+                    st.caption("Animated timeline showing patient state transitions over time.")
+
+                    import plotly.graph_objects as go_anim
+
+                    _sev_labels = {0: "Red", 1: "Yellow", 2: "Green", 3: "Black"}
+                    _sev_colors_map = {"Red": "#e74c3c", "Yellow": "#f39c12", "Green": "#2ecc71", "Black": "#2c3e50", "?": "#95a5a6"}
+
+                    # Build per-patient state at each event time
+                    _anim_events = sorted(blk["events"], key=lambda r: r["t"]) if blk else []
+                    if _anim_events:
+                        # Collect all unique times and patient states
+                        _all_patients = sorted(set(e.get("p") for e in _anim_events if e.get("p") is not None))
+                        if _all_patients:
+                            _state_names = {
+                                "p_rescue": "Rescued",
+                                "amb_arrival_site": "AMB Ready",
+                                "uav_arrival_site": "UAV Ready",
+                                "amb_arrival_hospital": "At Hospital",
+                                "uav_arrival_hospital": "At Hospital",
+                                "p_care_ready": "In Treatment",
+                                "p_def_care": "Completed",
+                            }
+                            _state_order = {"Waiting": 0, "Rescued": 1, "AMB Ready": 1, "UAV Ready": 1,
+                                            "In Transport": 2, "At Hospital": 3, "In Treatment": 4, "Completed": 5}
+
+                            # Track each patient's current state over time
+                            _p_current = {p: "Waiting" for p in _all_patients}
+                            _p_severity = {}
+
+                            # Determine severity for each patient from onset
+                            _onset_ev = [e for e in _anim_events if e.get("ev") == "onset"]
+                            # Get severity from p_rescue events
+                            for e in _anim_events:
+                                p = e.get("p")
+                                if p is not None and e.get("ev") == "p_rescue":
+                                    # Infer severity from patient ID ranges (or use severity field if available)
+                                    _p_severity.setdefault(p, "?")
+
+                            # Collect snapshots: use exact event times to avoid missing events
+                            _exact_times = sorted(set(e["t"] for e in _anim_events))
+                            # Sample up to 40 frames but always keep first + last + all state-change times
+                            _max_frames = 40
+                            if len(_exact_times) > _max_frames:
+                                _step = max(1, len(_exact_times) // _max_frames)
+                                _sampled = _exact_times[::_step]
+                                # Always include the very last event time (all patients done)
+                                if _sampled[-1] != _exact_times[-1]:
+                                    _sampled.append(_exact_times[-1])
+                                _time_points = sorted(set(_sampled))
+                            else:
+                                _time_points = _exact_times
+
+                            _frames_data = []
+                            _p_current = {p: "Waiting" for p in _all_patients}
+
+                            _ev_idx = 0
+                            for t_snap in _time_points:
+                                # Advance state for all events up to this time
+                                while _ev_idx < len(_anim_events) and _anim_events[_ev_idx]["t"] <= t_snap:
+                                    e = _anim_events[_ev_idx]
+                                    p = e.get("p")
+                                    ev_name = e.get("ev", "")
+                                    if p is not None and ev_name in _state_names:
+                                        _p_current[p] = _state_names[ev_name]
+                                    _ev_idx += 1
+
+                                for p in _all_patients:
+                                    _frames_data.append({
+                                        "time": t_snap,
+                                        "patient": f"P{p}",
+                                        "state": _p_current[p],
+                                        "state_num": _state_order.get(_p_current[p], 0),
+                                    })
+
+                            _adf = pd.DataFrame(_frames_data)
+
+                            if not _adf.empty:
+                                # Build animated figure with frames
+                                _patients_sorted = sorted(_adf["patient"].unique(), key=lambda x: int(x[1:]))
+                                _state_color_map = {
+                                    "Waiting": "#7f8c8d", "Rescued": "#3498db",
+                                    "AMB Ready": "#3498db", "UAV Ready": "#9b59b6",
+                                    "In Transport": "#f39c12", "At Hospital": "#e67e22",
+                                    "In Treatment": "#e74c3c", "Completed": "#2ecc71",
+                                }
+
+                                _first_t = _time_points[0]
+                                _init = _adf[_adf["time"] == _first_t]
+
+                                fig_anim = go_anim.Figure(
+                                    data=[go_anim.Bar(
+                                        y=_init["patient"],
+                                        x=_init["state_num"],
+                                        orientation='h',
+                                        marker=dict(
+                                            color=[_state_color_map.get(s, "#95a5a6") for s in _init["state"]],
+                                        ),
+                                        text=_init["state"],
+                                        textposition="inside",
+                                        hovertemplate="%{y}: %{text}<extra></extra>",
+                                    )],
+                                    layout=go_anim.Layout(
+                                        xaxis=dict(
+                                            range=[-0.5, 6],
+                                            tickmode="array",
+                                            tickvals=[0, 1, 2, 3, 4, 5],
+                                            ticktext=["Waiting", "Rescued", "Transport", "Hospital", "Treatment", "Completed"],
+                                        ),
+                                        yaxis=dict(categoryorder="array", categoryarray=_patients_sorted[::-1]),
+                                        height=max(400, len(_patients_sorted) * 20),
+                                        margin=dict(l=60, r=20, t=50, b=30),
+                                        title=f"Patient State at t = {_first_t:.1f} min",
+                                        updatemenus=[dict(
+                                            type="buttons",
+                                            showactive=False,
+                                            y=1.12, x=0.5, xanchor="center",
+                                            buttons=[
+                                                dict(label="Play", method="animate",
+                                                     args=[None, {"frame": {"duration": 400, "redraw": True},
+                                                                  "fromcurrent": True,
+                                                                  "transition": {"duration": 200}}]),
+                                                dict(label="Pause", method="animate",
+                                                     args=[[None], {"frame": {"duration": 0, "redraw": False},
+                                                                    "mode": "immediate",
+                                                                    "transition": {"duration": 0}}]),
+                                            ],
+                                        )],
+                                        sliders=[dict(
+                                            active=0,
+                                            steps=[
+                                                dict(args=[[str(t)], {"frame": {"duration": 300, "redraw": True},
+                                                                       "mode": "immediate",
+                                                                       "transition": {"duration": 200}}],
+                                                     label=f"{t:.0f}",
+                                                     method="animate")
+                                                for t in _time_points
+                                            ],
+                                            x=0.05, len=0.9,
+                                            y=-0.05,
+                                            currentvalue=dict(prefix="Time: ", suffix=" min", visible=True),
+                                            transition=dict(duration=200),
+                                        )],
+                                    ),
+                                    frames=[
+                                        go_anim.Frame(
+                                            data=[go_anim.Bar(
+                                                y=_adf[_adf["time"] == t]["patient"],
+                                                x=_adf[_adf["time"] == t]["state_num"],
+                                                orientation='h',
+                                                marker=dict(
+                                                    color=[_state_color_map.get(s, "#95a5a6")
+                                                           for s in _adf[_adf["time"] == t]["state"]],
+                                                ),
+                                                text=_adf[_adf["time"] == t]["state"],
+                                                textposition="inside",
+                                                hovertemplate="%{y}: %{text}<extra></extra>",
+                                            )],
+                                            layout=go_anim.Layout(title=f"Patient State at t = {t:.1f} min"),
+                                            name=str(t),
+                                        )
+                                        for t in _time_points
+                                    ],
+                                )
+
+                                st.plotly_chart(fig_anim, width='stretch')
+
+                                # Legend
+                                _legend_md = " | ".join(
+                                    f"<span style='color:{c}'>{s}</span>"
+                                    for s, c in _state_color_map.items()
+                                )
+                                st.markdown(f"**States:** {_legend_md}", unsafe_allow_html=True)
+                                st.caption("Press **Play** to animate or drag the slider. Each frame shows all patients' states at that time point.")
+
 
                 st.markdown("#### 🧰 Full Event Table")
                 ev_df = pd.DataFrame(blk["events"]).rename(columns={"t":"Time","eid":"EventID","ev":"Event","p":"Patient","a":"Ambulance","u":"UAV","h":"Hospital"}) if blk else pd.DataFrame()
@@ -1642,6 +1870,128 @@ with tabs[1]:
         else:
             st.info("No log files found for this combination.")
 
+        # ── Trace Replay (Per-Patient Timeline) ──
+        st.markdown("---")
+        st.markdown("### Simulation Trace Replay")
+        st.caption("Visualize per-patient event timeline from trace data. "
+                   "Run simulation with `--trace` flag to generate trace_*.json files.")
+
+        _trace_dir = Path(bp) / "results" / exp / coord
+        _trace_files = sorted(_trace_dir.glob("trace_*.json")) if _trace_dir.is_dir() else []
+
+        if not _trace_files:
+            st.info("No trace files found. Run simulation with `--trace` flag to enable trace logging.\n\n"
+                    "```bash\npython main.py --config_path <config.yaml> --trace\n```")
+        else:
+            _trace_sel = st.selectbox("Trace file", [f.name for f in _trace_files], key="trace_file_sel")
+            _trace_path = _trace_dir / _trace_sel
+
+            try:
+                with open(_trace_path, "r", encoding="utf-8") as _tf:
+                    _trace_data = json.load(_tf)
+
+                _trace_keys = list(_trace_data.keys())
+                if not _trace_keys:
+                    st.warning("Trace file is empty.")
+                else:
+                    _trace_rule = st.selectbox("Rule / Iteration", _trace_keys, key="trace_rule_sel")
+                    _events = _trace_data[_trace_rule]
+
+                    if not _events:
+                        st.info("No trace events for this rule/iteration.")
+                    else:
+                        import plotly.graph_objects as go_trace
+
+                        _severity_names = {0: "Red", 1: "Yellow", 2: "Green", 3: "Black"}
+                        _severity_colors = {0: "#e74c3c", 1: "#f1c40f", 2: "#2ecc71", 3: "#2c3e50"}
+
+                        # Build per-patient timeline
+                        _patient_events = {}
+                        for _ev in _events:
+                            pid = _ev.get("patient_id")
+                            if pid is not None:
+                                _patient_events.setdefault(pid, []).append(_ev)
+
+                        if not _patient_events:
+                            st.info("No patient-level events in trace.")
+                        else:
+                            # Gantt-style timeline
+                            _gantt_data = []
+                            for pid in sorted(_patient_events.keys()):
+                                pevts = sorted(_patient_events[pid], key=lambda x: x["time"])
+                                sev = pevts[0].get("severity", -1) if pevts else -1
+                                for j in range(len(pevts) - 1):
+                                    _gantt_data.append({
+                                        "patient_id": pid,
+                                        "severity": _severity_names.get(sev, "?"),
+                                        "event_start": pevts[j]["event"],
+                                        "event_end": pevts[j + 1]["event"],
+                                        "t_start": pevts[j]["time"],
+                                        "t_end": pevts[j + 1]["time"],
+                                        "color": _severity_colors.get(sev, "#95a5a6"),
+                                        "vehicle": pevts[j].get("vehicle", ""),
+                                        "hospital": pevts[j].get("hospital_id", ""),
+                                    })
+
+                            if _gantt_data:
+                                _gdf = pd.DataFrame(_gantt_data)
+
+                                fig_gantt = go_trace.Figure()
+                                for sev_name, sev_color in [("Red", "#e74c3c"), ("Yellow", "#f1c40f"),
+                                                            ("Green", "#2ecc71"), ("Black", "#2c3e50")]:
+                                    _sdf = _gdf[_gdf["severity"] == sev_name]
+                                    if _sdf.empty:
+                                        continue
+                                    for _, row in _sdf.iterrows():
+                                        fig_gantt.add_trace(go_trace.Bar(
+                                            y=[f"P{row['patient_id']}"],
+                                            x=[row["t_end"] - row["t_start"]],
+                                            base=row["t_start"],
+                                            orientation='h',
+                                            marker=dict(color=sev_color, opacity=0.7),
+                                            name=sev_name,
+                                            showlegend=False,
+                                            hovertemplate=(
+                                                f"Patient {row['patient_id']} ({sev_name})<br>"
+                                                f"{row['event_start']} -> {row['event_end']}<br>"
+                                                f"t={row['t_start']:.1f} - {row['t_end']:.1f} min<br>"
+                                                f"Vehicle: {row['vehicle']}<br>"
+                                                f"Hospital: {row['hospital']}<extra></extra>"
+                                            ),
+                                        ))
+
+                                n_patients = len(_patient_events)
+                                fig_gantt.update_layout(
+                                    barmode="overlay",
+                                    xaxis_title="Time (minutes)",
+                                    yaxis_title="Patient",
+                                    height=max(400, n_patients * 22),
+                                    margin=dict(l=60, r=20, t=30, b=30),
+                                    title=f"Patient Timeline ({_trace_rule[:50]})",
+                                )
+                                st.plotly_chart(fig_gantt, width='stretch')
+
+                            # Event summary table
+                            with st.expander("Trace Event Log"):
+                                st.dataframe(pd.DataFrame(_events), width='stretch', height=400)
+
+                            # Summary stats
+                            _n_rescue = sum(1 for e in _events if e["event"] == "rescue")
+                            _n_transport = sum(1 for e in _events if e["event"] == "transport_start")
+                            _n_arrival = sum(1 for e in _events if e["event"] == "hospital_arrival")
+                            _n_diversion = sum(1 for e in _events if e["event"] == "diversion")
+                            _n_care = sum(1 for e in _events if e["event"] == "care_complete")
+
+                            col_t1, col_t2, col_t3, col_t4, col_t5 = st.columns(5)
+                            col_t1.metric("Rescues", _n_rescue)
+                            col_t2.metric("Transports", _n_transport)
+                            col_t3.metric("Arrivals", _n_arrival)
+                            col_t4.metric("Diversions", _n_diversion)
+                            col_t5.metric("Completed", _n_care)
+
+            except Exception as e_trace:
+                st.error(f"Failed to load trace: {e_trace}")
+
 
 # ------------------------------
 # Maps tab (multi-select + UAV dispatch/transport toggle + enhanced legend)
@@ -1651,6 +2001,8 @@ with tabs[0]:
     bp   = st.session_state.base_path
     exp  = st.session_state.selected_exp
     coord= st.session_state.selected_coord
+
+    _map_mode = st.radio("Mode", ["Static Map", "Animation"], horizontal=True, key="map_mode_radio")
 
     # -- Map drawn in 'top-level' container, options placed below --
     map_holder = st.container()
@@ -2254,8 +2606,438 @@ with tabs[0]:
 
     # Output map to 'top-level' container
     with map_holder:
-        # Performance optimization: prevent unnecessary re-renders with key
-        st_folium(m, width=None, height=690, key="main_map", returned_objects=[])
+        if _map_mode == "Static Map":
+            st_folium(m, width=None, height=690, key="main_map", returned_objects=[])
+        else:
+            # ─────────────────────────────────────────────────────────────
+            # Animation Mode — Folium map + Leaflet JS animation overlay
+            # ─────────────────────────────────────────────────────────────
+            _anim_log_cands_raw = experiment_log_candidates(bp, exp, coord)
+            # Filter: only simulation logs (first line starts with "=== SIM_START")
+            _anim_log_cands = []
+            for _lp in _anim_log_cands_raw:
+                try:
+                    with open(_lp, "r", encoding="utf-8-sig") as _lf:
+                        _first = _lf.readline().strip()
+                    if _first.startswith("=== SIM_START"):
+                        _anim_log_cands.append(_lp)
+                except Exception:
+                    pass
+            if not _anim_log_cands:
+                st.info("No simulation logs found for this coordinate.")
+            else:
+                _anim_log_sel = st.selectbox("Log file", [Path(p).name for p in _anim_log_cands], key="anim_log_sel")
+                _anim_log_path = _anim_log_cands[[Path(p).name for p in _anim_log_cands].index(_anim_log_sel)]
+
+                try:
+                    _anim_blocks = parse_log_blocks(open(_anim_log_path, "r", encoding="utf-8-sig").read())
+                    # Preserve log order for rules; exclude (Unlabeled) -- env init artifact
+                    _anim_rules = list(dict.fromkeys(
+                        b["rule"] for b in _anim_blocks
+                        if b.get("rule") and b["rule"] != "(Unlabeled)"
+                    ))
+                    if not _anim_rules:
+                        st.warning("No rules found in log.")
+                    else:
+                        _anim_rule_sel = st.selectbox("Rule", _anim_rules, key="anim_rule_sel2")
+                        _anim_rule_blks = [b for b in _anim_blocks if b.get("rule") == _anim_rule_sel]
+                        _anim_iters = sorted({b.get("iter") for b in _anim_rule_blks if b.get("iter") is not None})
+                        _anim_iter_sel = None
+                        if _anim_iters:
+                            _anim_iter_sel = st.selectbox("Iteration", _anim_iters, key="anim_iter_sel2")
+                            _anim_cand = [b for b in _anim_rule_blks if b.get("iter") == _anim_iter_sel]
+                        else:
+                            _anim_cand = _anim_rule_blks
+                        _anim_blk = _anim_cand[0] if _anim_cand else None
+                        if not _anim_blk or not _anim_blk.get("events"):
+                            st.info("No events in selected block.")
+                        else:
+                            _log_ev = sorted(_anim_blk["events"], key=lambda r: r["t"])
+                            _incident_ll = (lat, lon)
+
+                            # ── Coordinate lookups ──
+                            _hosp_coords = {}
+                            if not hinfo_df.empty:
+                                for _, _hr in hinfo_df.iterrows():
+                                    _hi = int(_hr["Index"])
+                                    _hn = str(_hr.get("Hospital Name", "")).strip()
+                                    if _hn in xl_coord:
+                                        _hosp_coords[_hi] = (*xl_coord[_hn], _hn)
+
+                            _amb2station = {}
+                            _station_info = {}
+                            _amb_cursor = 0
+                            if not ambinfo_df.empty:
+                                for _, _sr in ambinfo_df.iterrows():
+                                    _si = int(_sr["Index"])
+                                    _sn = str(_sr.get("Fire Station", "")).strip()
+                                    _fleet = int(_sr.get("Fleet Size", 1)) if "Fleet Size" in _sr.index and pd.notna(_sr.get("Fleet Size")) else 1
+                                    for _robj in c2s_all:
+                                        _rm = _robj.get("meta", {})
+                                        if str(_rm.get("name", "")).strip() == _sn:
+                                            _sc = _rm.get("center") or _rm.get("start")
+                                            if isinstance(_sc, (list, tuple)) and len(_sc) == 2:
+                                                _station_info[_si] = (float(_sc[1]), float(_sc[0]), _sn)
+                                            break
+                                    for _fi in range(_fleet):
+                                        _amb2station[_amb_cursor] = _si
+                                        _amb_cursor += 1
+
+                            _uav_base = {}
+                            for _ui, (_uy, _ux, _un, _uc) in enumerate(uav_dispatch_latlons):
+                                _uav_base[_ui] = (_uy, _ux, _un)
+
+                            _c2s_poly = {}
+                            for _robj in c2s_all:
+                                _rm = _robj.get("meta", {})
+                                _rn = str(_rm.get("name", "")).strip()
+                                if _rn:
+                                    _pl = extract_polyline(_robj)
+                                    if _pl:
+                                        _c2s_poly[_rn] = _pl
+
+                            _s2h_poly = {}
+                            _h2s_poly = {}
+                            for _robj in h2s_all:
+                                _rm = _robj.get("meta", {})
+                                try:
+                                    _ri = int(_rm.get("source_index"))
+                                    _pl = extract_polyline(_robj)
+                                    if _pl:
+                                        _s2h_poly[_ri] = _pl
+                                        _h2s_poly[_ri] = list(reversed(_pl))
+                                except (TypeError, ValueError):
+                                    pass
+
+                            # ── Parse log events ──
+                            _amb_site_t = {}
+                            _uav_site_t = {}
+                            _p_rescue_t = {}
+                            _p_care_ready_t = {}
+                            _p_care_done_t = {}
+                            _transport_arrivals = []
+
+                            for _ev in _log_ev:
+                                _evn = _ev.get("ev", "")
+                                _t = _ev["t"]
+                                if _evn == "amb_arrival_site":
+                                    _a = _ev.get("a")
+                                    if _a is not None:
+                                        _amb_site_t.setdefault(_a, []).append(_t)
+                                elif _evn == "uav_arrival_site":
+                                    _u = _ev.get("u")
+                                    if _u is not None:
+                                        _uav_site_t.setdefault(_u, []).append(_t)
+                                elif _evn == "p_rescue":
+                                    _p = _ev.get("p")
+                                    if _p is not None:
+                                        _p_rescue_t.setdefault(_p, _t)
+                                elif _evn == "amb_arrival_hospital":
+                                    _p, _a, _h = _ev.get("p"), _ev.get("a"), _ev.get("h")
+                                    if _p is not None:
+                                        _transport_arrivals.append({"p": _p, "veh": "AMB", "vid": _a, "h": _h, "t": _t})
+                                elif _evn == "uav_arrival_hospital":
+                                    _p, _u, _h = _ev.get("p"), _ev.get("u"), _ev.get("h")
+                                    if _p is not None:
+                                        _transport_arrivals.append({"p": _p, "veh": "UAV", "vid": _u, "h": _h, "t": _t})
+                                elif _evn == "p_care_ready":
+                                    _p = _ev.get("p")
+                                    if _p is not None:
+                                        _p_care_ready_t.setdefault(_p, _t)
+                                elif _evn == "p_def_care":
+                                    _p = _ev.get("p")
+                                    if _p is not None:
+                                        _p_care_done_t.setdefault(_p, _t)
+
+                            # ── Build movement segments ──
+                            _segments = []
+                            for _a_idx, _t_list in _amb_site_t.items():
+                                _t_arr = _t_list[0]
+                                _st_idx = _amb2station.get(_a_idx)
+                                if _st_idx is not None and _st_idx in _station_info:
+                                    _sname = _station_info[_st_idx][2]
+                                    _poly = _c2s_poly.get(_sname, [(_station_info[_st_idx][0], _station_info[_st_idx][1]), _incident_ll])
+                                    _segments.append({"veh": "AMB", "vid": _a_idx, "phase": "dispatch",
+                                                      "poly": _poly, "t0": 0.0, "t1": _t_arr, "label": f"AMB-{_a_idx}"})
+                            for _u_idx, _t_list in _uav_site_t.items():
+                                if _u_idx in _uav_base:
+                                    _ub = _uav_base[_u_idx]
+                                    _segments.append({"veh": "UAV", "vid": _u_idx, "phase": "dispatch",
+                                                      "poly": [(_ub[0], _ub[1]), _incident_ll], "t0": 0.0, "t1": _t_list[0],
+                                                      "label": f"UAV-{_u_idx}"})
+
+                            _amb_avail = {a: list(tl) for a, tl in _amb_site_t.items()}
+                            _uav_avail = {u: list(tl) for u, tl in _uav_site_t.items()}
+                            for _ta in sorted(_transport_arrivals, key=lambda x: x["t"]):
+                                _p, _veh, _vid, _hid, _t_hosp = _ta["p"], _ta["veh"], _ta["vid"], _ta["h"], _ta["t"]
+                                _h_name = _hosp_coords[_hid][2] if _hid in _hosp_coords else f"H{_hid}"
+                                _t_rescue = _p_rescue_t.get(_p, 0)
+                                if _veh == "AMB":
+                                    _st = _amb_avail.get(_vid, [0])
+                                    _t_dep = max((s for s in _st if s <= _t_hosp), default=0)
+                                    _t_dep = max(_t_dep, _t_rescue)
+                                    _poly = _s2h_poly.get(_hid, [_incident_ll, (_hosp_coords[_hid][0], _hosp_coords[_hid][1])] if _hid in _hosp_coords else [])
+                                    if _poly:
+                                        _segments.append({"veh": "AMB", "vid": _vid, "phase": "transport",
+                                                          "poly": _poly, "t0": _t_dep, "t1": _t_hosp,
+                                                          "label": f"AMB-{_vid} P{_p}", "pid": _p})
+                                    _nxt = [s for s in _st if s > _t_hosp]
+                                    if _nxt:
+                                        _rpoly = _h2s_poly.get(_hid, [(_hosp_coords[_hid][0], _hosp_coords[_hid][1]), _incident_ll] if _hid in _hosp_coords else [])
+                                        if _rpoly:
+                                            _segments.append({"veh": "AMB", "vid": _vid, "phase": "return",
+                                                              "poly": _rpoly, "t0": _t_hosp, "t1": _nxt[0], "label": f"AMB-{_vid}"})
+                                else:
+                                    _st = _uav_avail.get(_vid, [0])
+                                    _t_dep = max((s for s in _st if s <= _t_hosp), default=0)
+                                    _t_dep = max(_t_dep, _t_rescue)
+                                    _dest = (_hosp_coords[_hid][0], _hosp_coords[_hid][1]) if _hid in _hosp_coords else (_uav_base[_vid][0], _uav_base[_vid][1]) if _vid in _uav_base else None
+                                    if _dest:
+                                        _segments.append({"veh": "UAV", "vid": _vid, "phase": "transport",
+                                                          "poly": [_incident_ll, _dest], "t0": _t_dep, "t1": _t_hosp,
+                                                          "label": f"UAV-{_vid} P{_p}", "pid": _p})
+                                        _nxt = [s for s in _st if s > _t_hosp]
+                                        if _nxt:
+                                            _segments.append({"veh": "UAV", "vid": _vid, "phase": "return",
+                                                              "poly": [_dest, _incident_ll], "t0": _t_hosp, "t1": _nxt[0],
+                                                              "label": f"UAV-{_vid}"})
+
+                            if not _segments:
+                                st.warning("No vehicle movements found.")
+                            else:
+                                # ── Pre-compute frame-by-frame positions ──
+                                _all_patients = sorted(_p_rescue_t.keys())
+                                _patient_hospital = {}
+                                for _ta in _transport_arrivals:
+                                    _patient_hospital.setdefault(_ta["p"], _ta["h"])
+
+                                _t_max_seg = max(s["t1"] for s in _segments)
+                                _t_max_care = max(_p_care_done_t.values()) if _p_care_done_t else _t_max_seg
+                                _t_max = max(_t_max_seg, _t_max_care)
+                                _n_frames = st.slider("Animation frames", 30, 300, 100, key="anim_frames_sl")
+                                _time_steps = np.linspace(0, _t_max, _n_frames).tolist()
+
+                                # Collect unique vehicles
+                                _veh_ids = list(dict.fromkeys((s["veh"], s["vid"]) for s in _segments))
+                                _veh_data = []
+                                for (_vtype, _vid) in _veh_ids:
+                                    _emoji = "\U0001F691" if _vtype == "AMB" else "\U0001F681"
+                                    _positions = []
+                                    for _ti, _t in enumerate(_time_steps):
+                                        _pos = None
+                                        _carrying = False
+                                        _phase = ""
+                                        for _seg in _segments:
+                                            if _seg["veh"] == _vtype and _seg["vid"] == _vid and _seg["t0"] <= _t <= _seg["t1"]:
+                                                _frac = (_t - _seg["t0"]) / max(0.001, _seg["t1"] - _seg["t0"])
+                                                _pp = _interpolate_along_polyline(_seg["poly"], _frac)
+                                                _pos = [_pp[0], _pp[1]]
+                                                _carrying = _seg.get("phase") == "transport"
+                                                _phase = _seg.get("phase", "")
+                                                break
+                                        # f: flip flag -- compare with previous position to determine heading
+                                        _flip = False
+                                        if _pos and _ti > 0 and _positions[_ti - 1] is not None:
+                                            _prev_lon = _positions[_ti - 1]["c"][1]
+                                            _flip = _pos[1] < _prev_lon  # moving west -> flip
+                                        _positions.append({"c": _pos, "k": _carrying, "f": _flip} if _pos else None)
+                                    _veh_data.append({"id": f"{_vtype}-{_vid}", "emoji": _emoji, "pos": _positions})
+
+                                # Patient positions per frame
+                                _pat_data = []
+                                for _pid in _all_patients:
+                                    _positions = []
+                                    _rt = _p_rescue_t.get(_pid)
+                                    _p_h = _patient_hospital.get(_pid)
+                                    _t_hosp_arr = None
+                                    for _ta in _transport_arrivals:
+                                        if _ta["p"] == _pid:
+                                            _t_hosp_arr = _ta["t"]
+                                            break
+                                    _t_done = _p_care_done_t.get(_pid)
+
+                                    for _t in _time_steps:
+                                        if _rt is None or _t < _rt:
+                                            _positions.append(None)
+                                        elif _t_done is not None and _t >= _t_done and _p_h in _hosp_coords:
+                                            _hc = _hosp_coords[_p_h]
+                                            _positions.append({"la": _hc[0]+0.001*((_pid%5)-2), "lo": _hc[1]+0.001*((_pid%3)-1), "e": "\u2705"})
+                                        elif _t_hosp_arr is not None and _t >= _t_hosp_arr and _p_h in _hosp_coords:
+                                            _hc = _hosp_coords[_p_h]
+                                            _positions.append({"la": _hc[0]+0.0008*((_pid%5)-2), "lo": _hc[1]+0.0008*((_pid%3)-1), "e": "\U0001F3E5"})
+                                        else:
+                                            _positions.append({"la": lat+0.0005*((_pid%7)-3), "lo": lon+0.0005*((_pid%5)-2), "e": "\U0001F6D1"})
+                                    _pat_data.append({"id": f"P{_pid}", "pos": _positions})
+
+                                # Build per-patient detail info for popup
+                                _pat_info = {}
+                                for _pid in _all_patients:
+                                    _info = {"id": _pid}
+                                    # Transport vehicle
+                                    for _ta in _transport_arrivals:
+                                        if _ta["p"] == _pid:
+                                            _info["veh"] = f"{_ta['veh']}-{_ta['vid']}"
+                                            _info["t_hosp"] = round(_ta["t"], 2)
+                                            _h_id = _ta["h"]
+                                            _info["hosp"] = _hosp_coords[_h_id][2] if _h_id in _hosp_coords else f"H{_h_id}"
+                                            break
+                                    _info["t_rescue"] = round(_p_rescue_t.get(_pid, 0), 2)
+                                    _t_care_ready = _p_care_ready_t.get(_pid)
+                                    _t_done = _p_care_done_t.get(_pid)
+                                    _t_hosp_a = _info.get("t_hosp")
+                                    # ER wait = care_ready - hospital_arrival (handover period)
+                                    # Treatment = def_care - care_ready
+                                    if _t_care_ready is not None and _t_hosp_a is not None:
+                                        _info["t_wait"] = round(_t_care_ready - _t_hosp_a, 2)
+                                    if _t_done is not None and _t_care_ready is not None:
+                                        _info["t_treat"] = round(_t_done - _t_care_ready, 2)
+                                    if _t_done is not None and _t_hosp_a is not None:
+                                        _info["t_stay"] = round(_t_done - _t_hosp_a, 2)
+                                    _info["t_done"] = round(_t_done, 2) if _t_done else None
+                                    _pat_info[f"P{_pid}"] = _info
+
+                                # Serialize animation data
+                                _anim_payload = json.dumps({"ts": _time_steps, "v": _veh_data, "p": _pat_data, "pi": _pat_info}, ensure_ascii=False)
+                                _map_var = m.get_name()
+
+                                # Inject Leaflet JS animation into the Folium map HTML
+                                # Control bar is placed BELOW the map (outside) to avoid legend overlap
+                                _anim_js = f"""
+<style>
+.anim-icon{{background:none!important;border:none!important;}}
+#anim-ctrl-bar{{
+  background:rgba(255,255,255,0.97);padding:10px 20px;border-radius:8px;
+  box-shadow:0 2px 8px rgba(0,0,0,.2);display:flex;align-items:center;
+  gap:12px;font-family:sans-serif;margin:8px auto 0;width:fit-content;
+}}
+#anim-ctrl-bar button{{
+  padding:5px 14px;cursor:pointer;font-size:14px;border:1px solid #bbb;
+  border-radius:5px;background:#fff;transition:background .15s;
+}}
+#anim-ctrl-bar button:hover{{background:#f0f0f0;}}
+</style>
+<div id="anim-ctrl-bar">
+  <button id="acb-play">&#9654; Play</button>
+  <button id="acb-replay" style="display:none;">&#x21BA; Replay</button>
+  <input id="acb-slider" type="range" min="0" max="1" value="0" style="width:300px;">
+  <span id="acb-time" style="font-size:13px;min-width:110px;">t = 0.0 min</span>
+</div>
+<script>
+(function(){{
+var POLL=setInterval(function(){{
+  if(typeof {_map_var}==='undefined') return;
+  clearInterval(POLL);
+  var map={_map_var};
+  var D={_anim_payload};
+  var ts=D.ts, nf=ts.length, cur=0, playing=false, tid=null;
+  var pbtn=document.getElementById('acb-play');
+  var rbtn=document.getElementById('acb-replay');
+  var sl=document.getElementById('acb-slider');
+  var tdisp=document.getElementById('acb-time');
+  sl.max=nf-1;
+  // Vehicle markers
+  var vm={{}};
+  D.v.forEach(function(v){{
+    var ic=L.divIcon({{html:'<span style="font-size:26px;filter:drop-shadow(0 0 2px white);">'+v.emoji+'</span>',className:'anim-icon',iconSize:[32,32],iconAnchor:[16,16]}});
+    var mk=L.marker([0,0],{{icon:ic,opacity:0,zIndexOffset:1000}});
+    mk.bindTooltip(v.id,{{permanent:false,direction:'top'}});
+    mk.addTo(map);
+    vm[v.id]={{mk:mk,base:v.emoji}};
+  }});
+  // Patient markers
+  var pm={{}};
+  var PI=D.pi||{{}};
+  function patPopup(pid){{
+    var d=PI[pid];if(!d)return '<b>'+pid+'</b><br>No detail available';
+    var h='<div style="font-size:13px;line-height:1.6;min-width:180px;">';
+    h+='<b style="font-size:14px;">'+pid+'</b><br>';
+    if(d.veh)h+='\U0001F698 Transport: <b>'+d.veh+'</b><br>';
+    if(d.hosp)h+='\U0001F3E5 Hospital: <b>'+d.hosp+'</b><br>';
+    h+='<hr style="margin:4px 0;border-color:#ddd;">';
+    if(d.t_rescue!=null)h+='\u23F1 Rescue: <b>'+d.t_rescue.toFixed(1)+'</b> min<br>';
+    if(d.t_hosp!=null)h+='\U0001F3E5 Arrival: <b>'+d.t_hosp.toFixed(1)+'</b> min<br>';
+    if(d.t_wait!=null)h+='\u23F3 ER Wait (Handover): <b>'+d.t_wait.toFixed(1)+'</b> min<br>';
+    if(d.t_treat!=null)h+='\U0001FA7A Treatment: <b>'+d.t_treat.toFixed(1)+'</b> min<br>';
+    if(d.t_stay!=null){{h+='<hr style="margin:4px 0;border-color:#ddd;">';h+='\U0001F4CB Total Stay: <b>'+d.t_stay.toFixed(1)+'</b> min<br>';}}
+    if(d.t_done!=null)h+='\u2705 Completed at: <b>'+d.t_done.toFixed(1)+'</b> min';
+    h+='</div>';return h;
+  }}
+  D.p.forEach(function(p){{
+    var ic=L.divIcon({{html:'<span style="font-size:14px;">\\u26AA</span>',className:'anim-icon',iconSize:[18,18],iconAnchor:[9,9]}});
+    var mk=L.marker([0,0],{{icon:ic,opacity:0,zIndexOffset:500}});
+    mk.bindTooltip(p.id,{{permanent:false,direction:'top'}});
+    mk.bindPopup(function(){{return patPopup(p.id);}},{{maxWidth:250}});
+    mk.addTo(map);
+    pm[p.id]=mk;
+  }});
+  function vehHtml(base,carrying,flip){{
+    var sx=flip?'transform:scaleX(-1);':'';
+    if(carrying){{
+      return '<span style="font-size:26px;display:inline-block;'+sx+'filter:drop-shadow(0 0 3px #ff4444);">'+base+'</span>'
+           + '<span style="font-size:13px;position:absolute;top:-6px;'+(flip?'left:-8px;':'right:-8px;')+'">\U0001F9D1\u200D\u2695\uFE0F</span>';
+    }}
+    return '<span style="font-size:26px;display:inline-block;'+sx+'filter:drop-shadow(0 0 2px white);">'+base+'</span>';
+  }}
+  function upd(idx){{
+    cur=idx;
+    D.v.forEach(function(v){{
+      var fr=v.pos[idx];
+      if(fr){{
+        var m2=vm[v.id].mk;
+        m2.setLatLng([fr.c[0],fr.c[1]]);m2.setOpacity(1);
+        var ni=L.divIcon({{html:vehHtml(vm[v.id].base,fr.k,fr.f),className:'anim-icon',iconSize:[32,32],iconAnchor:[16,16]}});
+        m2.setIcon(ni);
+      }} else{{vm[v.id].mk.setOpacity(0);}}
+    }});
+    D.p.forEach(function(p){{
+      var pos=p.pos[idx];
+      if(pos){{
+        pm[p.id].setLatLng([pos.la,pos.lo]);pm[p.id].setOpacity(1);
+        var sp=pm[p.id]._icon?pm[p.id]._icon.querySelector('span'):null;
+        if(sp)sp.textContent=pos.e;
+      }} else{{pm[p.id].setOpacity(0);}}
+    }});
+    sl.value=idx;
+    tdisp.textContent='t = '+ts[idx].toFixed(1)+' min';
+  }}
+  function play(){{
+    if(playing)return;playing=true;
+    rbtn.style.display='none';
+    pbtn.textContent='\\u23F8 Pause';
+    tid=setInterval(function(){{
+      if(cur>=nf-1){{pause();rbtn.style.display='inline-block';return;}}
+      upd(cur+1);
+    }},120);
+  }}
+  function pause(){{playing=false;pbtn.textContent='\\u25B6 Play';if(tid)clearInterval(tid);}}
+  function replay(){{pause();upd(0);rbtn.style.display='none';play();}}
+  pbtn.onclick=function(){{playing?pause():play();}};
+  rbtn.onclick=replay;
+  sl.oninput=function(){{upd(parseInt(this.value));}};
+  upd(0);
+}},200);
+}})();
+</script>
+"""
+                                m.get_root().html.add_child(folium.Element(_anim_js))
+                                import streamlit.components.v1 as stc
+                                _map_html = m.get_root().render()
+                                stc.html(_map_html, height=780, scrolling=False)
+
+                                _n_amb = sum(1 for s in _segments if s["veh"]=="AMB" and s["phase"]=="transport")
+                                _n_uav = sum(1 for s in _segments if s["veh"]=="UAV" and s["phase"]=="transport")
+                                _n_done = len(_p_care_done_t)
+                                st.caption(f"{_n_amb} AMB transports · {_n_uav} UAV transports · "
+                                           f"{_n_done}/{len(_all_patients)} patients completed")
+                                st.markdown(
+                                    "\U0001F691 AMB (empty) · \U0001F691+\U0001F9D1\u200D\u2695\uFE0F AMB (carrying patient) · "
+                                    "\U0001F681 UAV · "
+                                    "\U0001F6D1 Patient waiting · \U0001F3E5 Treating · \u2705 Done")
+
+                except Exception as _anim_err:
+                    st.error(f"Animation error: {_anim_err}")
+                    import traceback
+                    st.code(traceback.format_exc())
 
 
 # ------------------------------
@@ -2471,7 +3253,9 @@ with tabs[2]:
         if not st.session_state.get("analytics_loaded", False):
             st.caption("💡 Click 'Load Analysis Data' above to view analysis. (Disabled by default for faster tab loading)")
         else:
-            analytics_tabs = st.tabs(["RAW Data", "STAT Summary", "ANOVA Suite"])
+            analytics_tabs = st.tabs(["RAW Data", "STAT Summary", "ANOVA Suite",
+                                       "Pareto Dominance", "Bootstrap / Non-Parametric",
+                                       "Power Analysis", "Export"])
 
             # -- RAW Data sub-tab --
             with analytics_tabs[0]:
@@ -3223,6 +4007,612 @@ with tabs[2]:
 
                             else:
                                 st.caption("No post-hoc test results.")
+
+            # ══════════════════════════════════════════════════════════════
+            # TAB 4: Pareto Dominance Analysis
+            # ══════════════════════════════════════════════════════════════
+            with analytics_tabs[3]:
+                st.subheader("Multi-Objective Dominance Analysis")
+                st.caption("Statistical Pareto efficiency: rule A dominates B iff A is significantly better on at least one metric AND not significantly worse on any metric.")
+
+                if not rpath or not os.path.exists(rpath):
+                    st.info("Load RAW data first (results_*.txt required).")
+                else:
+                    pareto_alpha = st.slider("Significance level (alpha)", 0.001, 0.1, 0.05, 0.001, key="pareto_alpha")
+                    pareto_alpha = float(pareto_alpha)
+
+                    # Prepare data for all 3 metrics
+                    _pareto_metrics = {"Reward": False, "Time": True, "PDR": True}  # True = smaller is better
+                    _pareto_clds = {}
+                    _pareto_posthocs = {}
+                    _pareto_means = {}
+                    _pareto_ok = True
+
+                    for _pm, _pm_asc in _pareto_metrics.items():
+                        _pd_raw = _prep_metric(dfraw, _pm) if 'dfraw' in dir() else pd.DataFrame()
+                        if _pd_raw.empty:
+                            _pareto_ok = False
+                            break
+                        _pd_tr, _py, _ = _transform_for_metric(_pd_raw, _pm)
+                        try:
+                            _p_means, _p_cld, _p_explain = _rcbd_posthoc_cld(_pd_tr, _py, alpha=pareto_alpha, prefer_small_is_A=_pm_asc)
+                            # Also get the post-hoc table
+                            _rcbd_m = smf.ols(f"{_py} ~ C(rule) + C(run)", data=_pd_tr).fit()
+                            _p_ph, _p_emm = _emm_pairwise(_rcbd_m, _pd_tr, "rule", "run", _py, pareto_alpha)
+                            _pareto_posthocs[_pm] = _p_ph
+                            _pareto_means[_pm] = _pd_raw.groupby("rule")["value"].mean()
+                        except Exception as e_pareto:
+                            st.warning(f"Could not compute post-hoc for {_pm}: {e_pareto}")
+                            _pareto_ok = False
+                            break
+
+                    if not _pareto_ok or len(_pareto_posthocs) < 3:
+                        st.warning("All 3 metrics (Reward, Time, PDR) are required for Pareto analysis.")
+                    else:
+                        rules_all = sorted(_pareto_means["Reward"].index.tolist())
+                        n_rules = len(rules_all)
+
+                        # Build pairwise significance lookup
+                        def _sig_lookup(ph_df, alpha_v):
+                            """Returns dict: (g1,g2) -> p_adj"""
+                            lookup = {}
+                            for _, row in ph_df.iterrows():
+                                lookup[(row["group1"], row["group2"])] = row["p-adj"]
+                                lookup[(row["group2"], row["group1"])] = row["p-adj"]
+                            return lookup
+
+                        sig_tables = {m: _sig_lookup(ph, pareto_alpha) for m, ph in _pareto_posthocs.items()}
+
+                        # Statistical dominance check
+                        dominance_matrix = np.zeros((n_rules, n_rules), dtype=int)  # 1 if row dominates col
+                        for i, ri in enumerate(rules_all):
+                            for j, rj in enumerate(rules_all):
+                                if i == j:
+                                    continue
+                                sig_better_any = False
+                                sig_worse_any = False
+                                for _m, _m_asc in _pareto_metrics.items():
+                                    p_val = sig_tables[_m].get((ri, rj), 1.0)
+                                    mean_i = _pareto_means[_m][ri]
+                                    mean_j = _pareto_means[_m][rj]
+                                    if _m_asc:  # smaller is better
+                                        is_better = mean_i < mean_j
+                                    else:  # larger is better
+                                        is_better = mean_i > mean_j
+                                    if p_val < pareto_alpha:
+                                        if is_better:
+                                            sig_better_any = True
+                                        else:
+                                            sig_worse_any = True
+                                if sig_better_any and not sig_worse_any:
+                                    dominance_matrix[i, j] = 1
+
+                        # Compute dominance counts and Pareto layers
+                        dom_count = dominance_matrix.sum(axis=1)   # how many others I dominate
+                        dom_by_count = dominance_matrix.sum(axis=0)  # how many dominate me
+
+                        # Non-dominated sorting (NSGA-II style)
+                        remaining = set(range(n_rules))
+                        layers = []
+                        while remaining:
+                            front = []
+                            for i in remaining:
+                                dominated = False
+                                for j in remaining:
+                                    if i != j and dominance_matrix[j, i] == 1:
+                                        dominated = True
+                                        break
+                                if not dominated:
+                                    front.append(i)
+                            layers.append(front)
+                            remaining -= set(front)
+                            if len(layers) > n_rules:
+                                break
+
+                        layer_map = {}
+                        for li, layer in enumerate(layers):
+                            for idx in layer:
+                                layer_map[idx] = li + 1
+
+                        # Display Pareto summary table
+                        pareto_df = pd.DataFrame({
+                            "rule": rules_all,
+                            "Pareto_Layer": [layer_map[i] for i in range(n_rules)],
+                            "Dominates": dom_count.tolist(),
+                            "Dominated_By": dom_by_count.tolist(),
+                            "Reward_mean": [_pareto_means["Reward"][r] for r in rules_all],
+                            "Time_mean": [_pareto_means["Time"][r] for r in rules_all],
+                            "PDR_mean": [_pareto_means["PDR"][r] for r in rules_all],
+                        }).sort_values(["Pareto_Layer", "Dominates"], ascending=[True, False]).reset_index(drop=True)
+
+                        st.markdown("#### Pareto Layers (Layer 1 = non-dominated front)")
+                        st.dataframe(
+                            pareto_df.style.format({
+                                "Reward_mean": "{:.4f}", "Time_mean": "{:.2f}", "PDR_mean": "{:.4f}"
+                            }),
+                            width='stretch', hide_index=True,
+                        )
+
+                        n_front1 = len([x for x in layers[0]]) if layers else 0
+                        st.markdown(f"**Pareto Front (Layer 1):** {n_front1} rules | "
+                                    f"**Total Layers:** {len(layers)}")
+
+                        # 3D Scatter with Pareto layers
+                        import plotly.graph_objects as go_pareto
+                        fig_pareto = go_pareto.Figure()
+                        layer_colors = ["#e74c3c", "#f39c12", "#2ecc71", "#3498db", "#9b59b6", "#95a5a6"]
+                        for li, layer_idxs in enumerate(layers[:6]):
+                            layer_rules = [rules_all[i] for i in layer_idxs]
+                            fig_pareto.add_trace(go_pareto.Scatter3d(
+                                x=[_pareto_means["PDR"][r] for r in layer_rules],
+                                y=[_pareto_means["Time"][r] for r in layer_rules],
+                                z=[_pareto_means["Reward"][r] for r in layer_rules],
+                                mode="markers+text",
+                                marker=dict(size=8 if li == 0 else 5, color=layer_colors[li % len(layer_colors)],
+                                            opacity=0.9 if li == 0 else 0.5),
+                                text=[r.split(",")[-1].strip()[:15] for r in layer_rules],
+                                textposition="top center",
+                                textfont=dict(size=8),
+                                name=f"Layer {li+1} ({len(layer_idxs)})",
+                                hovertext=layer_rules,
+                            ))
+                        fig_pareto.update_layout(
+                            scene=dict(xaxis_title="PDR (lower=better)", yaxis_title="Time (lower=better)",
+                                       zaxis_title="Reward (higher=better)"),
+                            height=600, margin=dict(l=0, r=0, t=30, b=0),
+                            title="Statistical Pareto Dominance (3D)",
+                        )
+                        st.plotly_chart(fig_pareto, width='stretch')
+
+                        # Dominance heatmap (compact)
+                        with st.expander("Dominance Matrix (interactive)"):
+                            short_names = [r.split(",")[-1].strip()[:20] for r in rules_all]
+                            fig_heat = go_pareto.Figure(data=go_pareto.Heatmap(
+                                z=dominance_matrix, x=short_names, y=short_names,
+                                colorscale=[[0, "#2c3e50"], [1, "#e74c3c"]],
+                                showscale=False,
+                                hovertemplate="Row %{y} dominates Col %{x}: %{z}<extra></extra>",
+                            ))
+                            fig_heat.update_layout(height=600, xaxis_tickangle=45,
+                                                   title="Dominance Matrix (1 = row statistically dominates column)")
+                            st.plotly_chart(fig_heat, width='stretch')
+
+            # ══════════════════════════════════════════════════════════════
+            # TAB 5: Bootstrap / Non-Parametric Alternatives
+            # ══════════════════════════════════════════════════════════════
+            with analytics_tabs[4]:
+                st.subheader("Bootstrap CI & Non-Parametric Tests")
+                st.caption("When ANOVA normality assumptions are violated, use these robust alternatives.")
+
+                if not rpath or not os.path.exists(rpath):
+                    st.info("Load RAW data first (results_*.txt required).")
+                else:
+                    _bs_metric = st.selectbox("Metric", ["Reward", "Time", "PDR", "Reward w.o.G", "PDR w.o.G"],
+                                              key="bs_metric_sel")
+                    _bs_method = st.radio("Method", ["BCa Bootstrap CI", "Friedman Test (RCBD alternative)",
+                                                     "Kruskal-Wallis (One-way alternative)"], key="bs_method")
+
+                    _bs_raw = _prep_metric(dfraw, _bs_metric) if 'dfraw' in dir() else pd.DataFrame()
+                    if _bs_raw.empty:
+                        st.warning(f"No data for {_bs_metric}.")
+                    else:
+                        if _bs_method == "BCa Bootstrap CI":
+                            st.markdown("#### BCa Bootstrap Confidence Intervals")
+                            _bs_nboot = st.number_input("Bootstrap iterations", 1000, 50000, 9999, 1000, key="bs_nboot")
+                            _bs_conf = st.slider("Confidence level", 0.80, 0.99, 0.95, 0.01, key="bs_conf")
+
+                            with st.spinner("Computing bootstrap CIs..."):
+                                from scipy.stats import bootstrap as scipy_bootstrap
+                                _bs_rules = sorted(_bs_raw["rule"].unique())
+                                _bs_results = []
+                                for _br in _bs_rules:
+                                    _bdata = _bs_raw.loc[_bs_raw["rule"] == _br, "value"].values
+                                    try:
+                                        _bci = scipy_bootstrap(
+                                            (_bdata,), statistic=np.mean,
+                                            n_resamples=int(_bs_nboot),
+                                            confidence_level=float(_bs_conf),
+                                            method="BCa",
+                                        )
+                                        _bs_results.append({
+                                            "rule": _br, "mean": np.mean(_bdata),
+                                            "CI_low": _bci.confidence_interval.low,
+                                            "CI_high": _bci.confidence_interval.high,
+                                            "CI_width": _bci.confidence_interval.high - _bci.confidence_interval.low,
+                                            "std_error": _bci.standard_error,
+                                        })
+                                    except Exception as _be:
+                                        _bs_results.append({
+                                            "rule": _br, "mean": np.mean(_bdata),
+                                            "CI_low": np.nan, "CI_high": np.nan,
+                                            "CI_width": np.nan, "std_error": np.nan,
+                                        })
+                                _bs_df = pd.DataFrame(_bs_results)
+                                _is_asc = _small_is_better(_bs_metric) if '_small_is_better' in dir() else False
+                                _bs_df = _bs_df.sort_values("mean", ascending=_is_asc).reset_index(drop=True)
+
+                            st.dataframe(
+                                _bs_df.style.format({"mean": "{:.4f}", "CI_low": "{:.4f}", "CI_high": "{:.4f}",
+                                                     "CI_width": "{:.4f}", "std_error": "{:.4f}"}),
+                                width='stretch', hide_index=True,
+                            )
+                            st.caption(f"BCa Bootstrap ({int(_bs_nboot)} resamples, {_bs_conf*100:.0f}% CI). "
+                                       "No normality assumption required.")
+
+                            # Bootstrap CI comparison chart
+                            import plotly.graph_objects as go_bs
+                            fig_bs = go_bs.Figure()
+                            fig_bs.add_trace(go_bs.Scatter(
+                                x=_bs_df["mean"], y=list(range(len(_bs_df))),
+                                error_x=dict(type="data",
+                                             symmetric=False,
+                                             array=(_bs_df["CI_high"] - _bs_df["mean"]).tolist(),
+                                             arrayminus=(_bs_df["mean"] - _bs_df["CI_low"]).tolist()),
+                                mode="markers",
+                                marker=dict(size=6, color="#1abc9c"),
+                                text=_bs_df["rule"],
+                                hovertemplate="%{text}<br>Mean: %{x:.4f}<extra></extra>",
+                            ))
+                            fig_bs.update_layout(
+                                yaxis=dict(tickmode="array", tickvals=list(range(len(_bs_df))),
+                                           ticktext=[r[:30] for r in _bs_df["rule"]], autorange="reversed"),
+                                xaxis_title=_bs_metric,
+                                height=max(400, len(_bs_df) * 18),
+                                margin=dict(l=250, r=20, t=30, b=30),
+                                title=f"BCa Bootstrap CI ({_bs_metric})",
+                            )
+                            st.plotly_chart(fig_bs, width='stretch')
+
+                        elif _bs_method == "Friedman Test (RCBD alternative)":
+                            st.markdown("#### Friedman Test (non-parametric RCBD)")
+                            st.caption("Tests whether rule rankings are consistent across runs. No normality assumption.")
+
+                            # Pivot to wide format: rows=run, cols=rule
+                            if "run" not in _bs_raw.columns:
+                                st.warning("Run (block) information not available in raw data.")
+                            else:
+                                _fr_pivot = _bs_raw.pivot_table(index="run", columns="rule", values="value", aggfunc="mean")
+                                _fr_pivot = _fr_pivot.dropna(axis=1)
+                                if _fr_pivot.shape[1] < 2:
+                                    st.warning("Need at least 2 rules for Friedman test.")
+                                else:
+                                    from scipy.stats import friedmanchisquare
+                                    _fr_groups = [_fr_pivot[c].values for c in _fr_pivot.columns]
+                                    _fr_stat, _fr_p = friedmanchisquare(*_fr_groups)
+                                    _fr_n = _fr_pivot.shape[0]
+                                    _fr_k = _fr_pivot.shape[1]
+                                    # Kendall's W
+                                    _fr_W = _fr_stat / (_fr_n * (_fr_k - 1)) if (_fr_n * (_fr_k - 1)) > 0 else 0
+
+                                    col_fr1, col_fr2, col_fr3, col_fr4 = st.columns(4)
+                                    col_fr1.metric("Chi-square", f"{_fr_stat:.3f}")
+                                    col_fr2.metric("p-value", f"{_fr_p:.3g}")
+                                    col_fr3.metric("Kendall's W", f"{_fr_W:.4f}")
+                                    col_fr4.metric("Effect", "Large" if _fr_W > 0.5 else "Medium" if _fr_W > 0.3 else "Small")
+
+                                    if _fr_p < 0.05:
+                                        st.success(f"Significant (p={_fr_p:.3g}): Rule rankings differ across runs.")
+                                    else:
+                                        st.info(f"Not significant (p={_fr_p:.3g}): No evidence of consistent ranking differences.")
+
+                                    # Post-hoc: Conover-Friedman or Nemenyi
+                                    with st.expander("Post-hoc: Conover-Friedman pairwise comparisons"):
+                                        try:
+                                            from scipy.stats import rankdata
+                                            from statsmodels.stats.multitest import multipletests as _mt
+                                            # Rank within each block
+                                            _fr_ranks = _fr_pivot.rank(axis=1)
+                                            _fr_mean_ranks = _fr_ranks.mean()
+                                            _fr_rule_names = _fr_pivot.columns.tolist()
+                                            # Conover test statistic
+                                            _A2 = (_fr_ranks.values ** 2).sum()
+                                            _C = _fr_n * _fr_k * (_fr_k + 1)**2 / 4
+                                            _T1 = (_fr_n - 1) * _fr_stat / (_fr_n * (_fr_k - 1) - _fr_stat) if (_fr_n * (_fr_k - 1) - _fr_stat) > 0 else 0
+                                            _se = np.sqrt(2 * _fr_n * (_A2 - _C) / ((_fr_n - 1) * (_fr_k - 1))) if (_fr_n - 1) * (_fr_k - 1) > 0 else 1
+
+                                            from scipy.stats import t as t_dist
+                                            _con_pairs, _con_pvals = [], []
+                                            for i in range(len(_fr_rule_names)):
+                                                for j in range(i+1, len(_fr_rule_names)):
+                                                    _diff = abs(_fr_mean_ranks[_fr_rule_names[i]] - _fr_mean_ranks[_fr_rule_names[j]])
+                                                    _t_val = _diff / (_se / np.sqrt(_fr_n)) if _se > 0 else 0
+                                                    _df_con = (_fr_n - 1) * (_fr_k - 1)
+                                                    _p_con = 2 * (1 - t_dist.cdf(abs(_t_val), _df_con))
+                                                    _con_pairs.append((_fr_rule_names[i], _fr_rule_names[j]))
+                                                    _con_pvals.append(_p_con)
+
+                                            _rej, _padj, _, _ = _mt(_con_pvals, method="holm")
+                                            _con_df = pd.DataFrame({
+                                                "group1": [p[0] for p in _con_pairs],
+                                                "group2": [p[1] for p in _con_pairs],
+                                                "p-adj": _padj, "reject": _rej,
+                                            })
+                                            st.dataframe(_con_df, width='stretch')
+                                        except Exception as e_con:
+                                            st.warning(f"Conover post-hoc failed: {e_con}")
+
+                        else:  # Kruskal-Wallis
+                            st.markdown("#### Kruskal-Wallis Test (non-parametric one-way)")
+                            st.caption("Non-parametric alternative to one-way ANOVA. No normality assumption.")
+
+                            from scipy.stats import kruskal
+                            _kw_rules = sorted(_bs_raw["rule"].unique())
+                            _kw_groups = [_bs_raw.loc[_bs_raw["rule"] == r, "value"].values for r in _kw_rules]
+                            _kw_stat, _kw_p = kruskal(*_kw_groups)
+                            _kw_n = len(_bs_raw)
+                            # Epsilon-squared effect size
+                            _kw_eps2 = (_kw_stat - len(_kw_rules) + 1) / (_kw_n - len(_kw_rules)) if (_kw_n - len(_kw_rules)) > 0 else 0
+
+                            col_kw1, col_kw2, col_kw3 = st.columns(3)
+                            col_kw1.metric("H-statistic", f"{_kw_stat:.3f}")
+                            col_kw2.metric("p-value", f"{_kw_p:.3g}")
+                            col_kw3.metric("Epsilon-sq", f"{_kw_eps2:.4f}")
+
+                            if _kw_p < 0.05:
+                                st.success(f"Significant (p={_kw_p:.3g}): At least one rule differs.")
+                                with st.expander("Post-hoc: Dunn's test with Holm correction"):
+                                    try:
+                                        import scikit_posthocs as sp
+                                        _dunn = sp.posthoc_dunn(_bs_raw, val_col="value", group_col="rule", p_adjust="holm")
+                                        st.dataframe(_dunn.style.format("{:.4f}"), width='stretch')
+                                    except ImportError:
+                                        # Manual Dunn's approximation
+                                        from scipy.stats import rankdata as _rd
+                                        from statsmodels.stats.multitest import multipletests as _mt2
+                                        _all_vals = _bs_raw["value"].values
+                                        _all_ranks = _rd(_all_vals)
+                                        _bs_raw_c = _bs_raw.copy()
+                                        _bs_raw_c["_rank"] = _all_ranks
+                                        _mean_ranks = _bs_raw_c.groupby("rule")["_rank"].mean()
+                                        _ns = _bs_raw_c.groupby("rule").size()
+                                        _N = len(_all_vals)
+                                        _tie_corr = 1  # simplified
+                                        _dunn_pairs, _dunn_pvals = [], []
+                                        for ki in range(len(_kw_rules)):
+                                            for kj in range(ki+1, len(_kw_rules)):
+                                                _ri, _rj = _kw_rules[ki], _kw_rules[kj]
+                                                _z = abs(_mean_ranks[_ri] - _mean_ranks[_rj]) / np.sqrt(
+                                                    _N * (_N + 1) / 12 * (1/_ns[_ri] + 1/_ns[_rj])) if (_ns[_ri] > 0 and _ns[_rj] > 0) else 0
+                                                from scipy.stats import norm
+                                                _p_d = 2 * (1 - norm.cdf(abs(_z)))
+                                                _dunn_pairs.append((_ri, _rj))
+                                                _dunn_pvals.append(_p_d)
+                                        _rej_d, _padj_d, _, _ = _mt2(_dunn_pvals, method="holm")
+                                        _dunn_df = pd.DataFrame({
+                                            "group1": [p[0] for p in _dunn_pairs],
+                                            "group2": [p[1] for p in _dunn_pairs],
+                                            "p-adj": _padj_d, "reject": _rej_d,
+                                        })
+                                        st.dataframe(_dunn_df, width='stretch')
+                            else:
+                                st.info(f"Not significant (p={_kw_p:.3g}): No evidence of differences between rules.")
+
+            # ══════════════════════════════════════════════════════════════
+            # TAB 6: Power Analysis
+            # ══════════════════════════════════════════════════════════════
+            with analytics_tabs[5]:
+                st.subheader("Power Analysis & Sample Size Recommendation")
+                st.caption("Assess whether the current sample size provides adequate statistical power to detect meaningful differences.")
+
+                if not rpath or not os.path.exists(rpath):
+                    st.info("Load RAW data first (results_*.txt required).")
+                else:
+                    _pw_metric = st.selectbox("Metric for power analysis", ["Reward", "Time", "PDR"],
+                                              key="pw_metric_sel")
+                    _pw_raw = _prep_metric(dfraw, _pw_metric) if 'dfraw' in dir() else pd.DataFrame()
+                    if _pw_raw.empty:
+                        st.warning(f"No data for {_pw_metric}.")
+                    else:
+                        _pw_tr, _pw_y, _ = _transform_for_metric(_pw_raw, _pw_metric)
+                        try:
+                            _pw_model = smf.ols(f"{_pw_y} ~ C(rule) + C(run)", data=_pw_tr).fit()
+                            _pw_anova = sm.stats.anova_lm(_pw_model, typ=2)
+
+                            # Extract effect sizes
+                            _pw_ss_rule = float(_pw_anova.loc["C(rule)", "sum_sq"])
+                            _pw_ss_resid = float(_pw_anova.loc["Residual", "sum_sq"])
+                            _pw_ss_total = _pw_ss_rule + _pw_ss_resid
+                            _pw_df_rule = int(_pw_anova.loc["C(rule)", "df"])
+                            _pw_df_resid = int(_pw_anova.loc["Residual", "df"])
+                            _pw_ms_resid = _pw_ss_resid / _pw_df_resid if _pw_df_resid > 0 else 1
+                            _pw_eta2 = _pw_ss_rule / _pw_ss_total if _pw_ss_total > 0 else 0
+                            _pw_f2 = _pw_eta2 / (1 - _pw_eta2) if _pw_eta2 < 1 else 0  # Cohen's f-squared
+
+                            _pw_k = _pw_df_rule + 1  # number of groups
+                            _pw_n_per = len(_pw_raw) // _pw_k if _pw_k > 0 else 30  # samples per group
+                            _pw_F_obs = float(_pw_anova.loc["C(rule)", "F"])
+
+                            # Post-hoc power using non-central F distribution
+                            from scipy.stats import ncf, f as fdist
+                            _pw_ncp = _pw_f2 * _pw_n_per * _pw_k  # non-centrality parameter
+                            _pw_f_crit = fdist.ppf(0.95, _pw_df_rule, _pw_df_resid)
+                            _pw_power = 1 - ncf.cdf(_pw_f_crit, _pw_df_rule, _pw_df_resid, _pw_ncp)
+
+                            st.markdown("#### Post-hoc Power Analysis (Current Data)")
+                            col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+                            col_p1.metric("eta-squared", f"{_pw_eta2:.4f}")
+                            col_p2.metric("Cohen's f", f"{np.sqrt(_pw_f2):.4f}")
+                            col_p3.metric("n per group", f"{_pw_n_per}")
+                            col_p4.metric("Observed Power", f"{_pw_power:.3f}")
+
+                            _pw_interp = "Adequate" if _pw_power >= 0.8 else "Marginal" if _pw_power >= 0.5 else "Low"
+                            if _pw_power >= 0.8:
+                                st.success(f"Power = {_pw_power:.3f} ({_pw_interp}). Current sample size is sufficient to detect the observed effect.")
+                            elif _pw_power >= 0.5:
+                                st.warning(f"Power = {_pw_power:.3f} ({_pw_interp}). Consider increasing totalSamples for reliable detection.")
+                            else:
+                                st.error(f"Power = {_pw_power:.3f} ({_pw_interp}). Sample size is insufficient. Increase totalSamples significantly.")
+
+                            # Prospective: power curve
+                            st.markdown("#### Prospective Power Curve")
+                            st.caption("How many samples per group are needed to achieve a target power?")
+                            _pw_target = st.slider("Target power", 0.50, 0.99, 0.80, 0.05, key="pw_target")
+
+                            _pw_ns = np.arange(5, 201, 5)
+                            _pw_powers = []
+                            for _n in _pw_ns:
+                                _ncp_n = _pw_f2 * _n * _pw_k
+                                _df_resid_n = (_n - 1) * _pw_k  # approximate
+                                _f_crit_n = fdist.ppf(0.95, _pw_df_rule, max(_df_resid_n, 1))
+                                _pow_n = 1 - ncf.cdf(_f_crit_n, _pw_df_rule, max(_df_resid_n, 1), _ncp_n)
+                                _pw_powers.append(_pow_n)
+
+                            # Find required n
+                            _pw_req_n = None
+                            for _ni, _pi in zip(_pw_ns, _pw_powers):
+                                if _pi >= float(_pw_target):
+                                    _pw_req_n = _ni
+                                    break
+
+                            import plotly.graph_objects as go_pw
+                            fig_pw = go_pw.Figure()
+                            fig_pw.add_trace(go_pw.Scatter(
+                                x=_pw_ns.tolist(), y=_pw_powers,
+                                mode="lines+markers", marker=dict(size=4, color="#1abc9c"),
+                                line=dict(width=2, color="#1abc9c"),
+                                name="Power",
+                            ))
+                            fig_pw.add_hline(y=float(_pw_target), line_dash="dash", line_color="#e74c3c",
+                                             annotation_text=f"Target={_pw_target:.2f}")
+                            fig_pw.add_vline(x=_pw_n_per, line_dash="dot", line_color="#3498db",
+                                             annotation_text=f"Current n={_pw_n_per}")
+                            if _pw_req_n:
+                                fig_pw.add_vline(x=_pw_req_n, line_dash="dash", line_color="#2ecc71",
+                                                 annotation_text=f"Required n={_pw_req_n}")
+                            fig_pw.update_layout(
+                                xaxis_title="Samples per group (totalSamples)",
+                                yaxis_title="Statistical Power",
+                                yaxis_range=[0, 1.05],
+                                height=400,
+                                title=f"Power Curve ({_pw_metric}, Cohen's f = {np.sqrt(_pw_f2):.4f})",
+                            )
+                            st.plotly_chart(fig_pw, width='stretch')
+
+                            if _pw_req_n:
+                                st.info(f"To achieve power >= {_pw_target:.2f}, set **totalSamples >= {_pw_req_n}** (currently {_pw_n_per}).")
+                            else:
+                                st.info(f"Power >= {_pw_target:.2f} not achievable within n=200. Effect may be too small to detect reliably.")
+
+                            # Effect size interpretation table
+                            with st.expander("Effect Size Reference (Cohen 1988)"):
+                                _eff_ref = pd.DataFrame({
+                                    "Effect Size": ["Small", "Medium", "Large"],
+                                    "Cohen's f": ["0.10", "0.25", "0.40"],
+                                    "eta-squared": ["0.01", "0.06", "0.14"],
+                                    "Your value": [f"f={np.sqrt(_pw_f2):.4f}", f"eta2={_pw_eta2:.4f}", ""],
+                                })
+                                st.table(_eff_ref)
+
+                        except Exception as e_pw:
+                            st.warning(f"Power analysis failed: {e_pw}")
+
+            # ══════════════════════════════════════════════════════════════
+            # TAB 7: Publication Export
+            # ══════════════════════════════════════════════════════════════
+            with analytics_tabs[6]:
+                st.subheader("Publication-Quality Export")
+                st.caption("Export ANOVA tables, CLD results, and figures in publication-ready formats.")
+
+                if not rpath or not os.path.exists(rpath):
+                    st.info("Load RAW data first.")
+                else:
+                    _ex_alpha = st.slider("Alpha for export analysis", 0.001, 0.1, 0.05, 0.001, key="ex_alpha")
+                    _ex_alpha = float(_ex_alpha)
+
+                    # Generate all analyses for export
+                    _ex_metrics = ["Reward", "Time", "PDR"]
+                    _ex_latex_parts = []
+                    _ex_cld_parts = []
+
+                    for _em in _ex_metrics:
+                        _ex_raw = _prep_metric(dfraw, _em) if 'dfraw' in dir() else pd.DataFrame()
+                        if _ex_raw.empty:
+                            continue
+                        _ex_tr, _ey, _ = _transform_for_metric(_ex_raw, _em)
+                        try:
+                            _ex_model = smf.ols(f"{_ey} ~ C(rule) + C(run)", data=_ex_tr).fit()
+                            _ex_anova = sm.stats.anova_lm(_ex_model, typ=2)
+
+                            # Add effect sizes
+                            _ex_ss_total = _ex_anova["sum_sq"].sum()
+                            _ex_anova["eta_sq"] = _ex_anova["sum_sq"] / _ex_ss_total
+                            _ms_r = float(_ex_anova.loc["Residual", "sum_sq"] / _ex_anova.loc["Residual", "df"]) if _ex_anova.loc["Residual", "df"] > 0 else 0
+                            _ex_anova["omega_sq"] = (_ex_anova["sum_sq"] - _ex_anova["df"] * _ms_r) / (_ex_ss_total + _ms_r)
+                            _ex_anova.loc[_ex_anova["omega_sq"] < 0, "omega_sq"] = 0.0
+
+                            # Format ANOVA table for LaTeX
+                            _ex_at = _ex_anova.copy()
+                            _ex_at.index = _ex_at.index.str.replace("C(rule)", "Rule", regex=False)
+                            _ex_at.index = _ex_at.index.str.replace("C(run)", "Block (Run)", regex=False)
+                            _ex_at = _ex_at.rename(columns={
+                                "sum_sq": "SS", "df": "df", "F": "F", "PR(>F)": "p",
+                                "eta_sq": "$\\eta^2$", "omega_sq": "$\\omega^2$"
+                            })
+                            _ex_at["MS"] = _ex_at["SS"] / _ex_at["df"]
+                            _ex_at = _ex_at[["SS", "df", "MS", "F", "p", "$\\eta^2$", "$\\omega^2$"]]
+
+                            _latex = _ex_at.to_latex(
+                                float_format="%.4f", na_rep="--",
+                                caption=f"ANOVA Table for {_em} (RCBD, $\\alpha$={_ex_alpha})",
+                                label=f"tab:anova_{_em.lower()}",
+                                escape=False,
+                            )
+                            _ex_latex_parts.append(f"% === {_em} ===\n{_latex}")
+
+                            # CLD table
+                            _is_asc = _em == "Time" or _em.startswith("PDR")
+                            _ex_ph, _ex_emm = _emm_pairwise(_ex_model, _ex_tr, "rule", "run", _ey, _ex_alpha)
+                            _ex_emm_sorted = _ex_emm.sort_values(ascending=_is_asc)
+                            _ex_cld = cld_from_pairs(_ex_emm_sorted, _ex_ph, alpha=_ex_alpha)
+                            if not _ex_cld.empty:
+                                # Add original-scale means
+                                _orig_means = _ex_raw.groupby("rule")["value"].mean()
+                                _ex_cld["orig_mean"] = _ex_cld["rule"].map(_orig_means)
+                                _cld_latex = _ex_cld.to_latex(
+                                    float_format="%.4f", index=False,
+                                    caption=f"CLD for {_em} (shared letter = no significant difference at $\\alpha$={_ex_alpha})",
+                                    label=f"tab:cld_{_em.lower()}",
+                                )
+                                _ex_cld_parts.append(f"% === CLD: {_em} ===\n{_cld_latex}")
+                        except Exception as e_ex:
+                            _ex_latex_parts.append(f"% === {_em}: FAILED ({e_ex}) ===")
+
+                    if _ex_latex_parts:
+                        st.markdown("#### ANOVA Tables (LaTeX)")
+                        _full_latex = "\n\n".join(_ex_latex_parts)
+                        st.code(_full_latex, language="latex")
+                        st.download_button("Download ANOVA LaTeX", _full_latex,
+                                           file_name="anova_tables.tex", mime="text/plain", key="dl_anova_tex")
+
+                    if _ex_cld_parts:
+                        st.markdown("#### CLD Tables (LaTeX)")
+                        _full_cld_latex = "\n\n".join(_ex_cld_parts)
+                        st.code(_full_cld_latex, language="latex")
+                        st.download_button("Download CLD LaTeX", _full_cld_latex,
+                                           file_name="cld_tables.tex", mime="text/plain", key="dl_cld_tex")
+
+                    # CSV export of all results
+                    st.markdown("#### Combined CSV Export")
+                    _csv_parts = []
+                    for _em in _ex_metrics:
+                        _ex_raw = _prep_metric(dfraw, _em) if 'dfraw' in dir() else pd.DataFrame()
+                        if _ex_raw.empty:
+                            continue
+                        _summary = _ex_raw.groupby("rule")["value"].agg(["mean", "std", "count"]).reset_index()
+                        _summary["metric"] = _em
+                        _csv_parts.append(_summary)
+                    if _csv_parts:
+                        _csv_all = pd.concat(_csv_parts, ignore_index=True)
+                        _csv_str = _csv_all.to_csv(index=False)
+                        st.download_button("Download Summary CSV", _csv_str,
+                                           file_name="analysis_summary.csv", mime="text/csv", key="dl_summary_csv")
+
+                    # Raw data export
+                    st.markdown("#### Raw Data Export (all metrics, long format)")
+                    if 'dfraw' in dir() and not dfraw.empty:
+                        _raw_csv = dfraw.to_csv(index=False)
+                        st.download_button("Download Raw Data CSV", _raw_csv,
+                                           file_name="raw_data_long.csv", mime="text/csv", key="dl_raw_csv")
 
 
 # ------------------------------

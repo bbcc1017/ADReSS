@@ -716,3 +716,395 @@ else:
     )
     st.caption("Composite = mean of min-max normalized scores (Reward↑, Time↓, PDR↓). "
                "Tier: A = top 25%, B = 25–50%, C = bottom 50%.")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Cross-Scenario Meta-Analysis
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown("---")
+st.markdown("## Cross-Scenario Meta-Analysis")
+st.caption("Assess whether rule rankings generalize across locations/experiments.")
+
+if df_raw.empty or "label" not in df_raw.columns:
+    st.info("Multi-experiment data required for meta-analysis.")
+else:
+    _meta_labels = sorted(df_raw["label"].unique())
+    if len(_meta_labels) < 2:
+        st.info("At least 2 distinct labels (locations/experiments) are needed for meta-analysis.")
+    else:
+        _meta_metric = st.selectbox("Metric for meta-analysis",
+                                     ["Reward", "Time", "PDR"], key="meta_metric")
+        _meta_df = df_raw[df_raw["metric"] == _meta_metric].copy()
+
+        if _meta_df.empty:
+            st.warning(f"No {_meta_metric} data available.")
+        else:
+            # Per-label rule means
+            _meta_pivot = _meta_df.groupby(["label", "rule"])["value"].mean().reset_index()
+            _meta_wide = _meta_pivot.pivot_table(index="rule", columns="label", values="value")
+            _meta_wide = _meta_wide.dropna()
+
+            if _meta_wide.shape[0] < 2 or _meta_wide.shape[1] < 2:
+                st.warning("Insufficient data for meta-analysis (need 2+ rules across 2+ locations).")
+            else:
+                st.markdown("### Kendall's W (Concordance of Rankings)")
+                st.caption("Measures agreement in rule rankings across locations. W=1: perfect agreement, W=0: no agreement.")
+
+                from scipy.stats import rankdata as _meta_rankdata
+                # Rank rules within each location
+                _meta_ranks = _meta_wide.copy()
+                _is_asc = _meta_metric in ("Time", "PDR")
+                for col in _meta_ranks.columns:
+                    _meta_ranks[col] = _meta_rankdata(
+                        _meta_ranks[col].values * (1 if _is_asc else -1)
+                    )
+
+                _m_k = _meta_ranks.shape[1]  # number of raters (locations)
+                _m_n = _meta_ranks.shape[0]  # number of items (rules)
+                _m_rank_sums = _meta_ranks.sum(axis=1)
+                _m_S = ((_m_rank_sums - _m_rank_sums.mean()) ** 2).sum()
+                _m_W = 12 * _m_S / (_m_k**2 * (_m_n**3 - _m_n)) if (_m_k**2 * (_m_n**3 - _m_n)) > 0 else 0
+
+                # Chi-square test for significance
+                _m_chi2 = _m_k * (_m_n - 1) * _m_W
+                _m_df_chi = _m_n - 1
+                from scipy.stats import chi2 as _chi2_dist
+                _m_p = 1 - _chi2_dist.cdf(_m_chi2, _m_df_chi)
+
+                col_w1, col_w2, col_w3, col_w4 = st.columns(4)
+                col_w1.metric("Kendall's W", f"{_m_W:.4f}")
+                col_w2.metric("Chi-square", f"{_m_chi2:.2f}")
+                col_w3.metric("p-value", f"{_m_p:.3g}")
+                col_w4.metric("Interpretation",
+                              "Strong" if _m_W > 0.7 else "Moderate" if _m_W > 0.4 else "Weak")
+
+                if _m_p < 0.05:
+                    st.success(f"Significant concordance (p={_m_p:.3g}): Rule rankings are consistent across locations.")
+                else:
+                    st.warning(f"No significant concordance (p={_m_p:.3g}): Rule performance may be location-dependent.")
+
+                # Forest Plot
+                st.markdown("### Forest Plot (Rule Performance Across Locations)")
+                _forest_n = st.slider("Show top N rules", 5, 64, 15, 1, key="forest_n")
+
+                # Compute per-rule grand mean and CI across locations
+                _forest_stats = []
+                for _rule in _meta_wide.index:
+                    _vals = _meta_wide.loc[_rule].values
+                    _f_mean = np.mean(_vals)
+                    _f_std = np.std(_vals, ddof=1) if len(_vals) > 1 else 0
+                    _f_n = len(_vals)
+                    _f_se = _f_std / np.sqrt(_f_n) if _f_n > 0 else 0
+                    from scipy.stats import t as _t_dist
+                    if _f_n > 1:
+                        _f_ci = _t_dist.interval(0.95, df=_f_n-1, loc=_f_mean, scale=_f_se)
+                    else:
+                        _f_ci = (_f_mean, _f_mean)
+                    _forest_stats.append({
+                        "rule": _rule, "grand_mean": _f_mean,
+                        "CI_low": _f_ci[0], "CI_high": _f_ci[1],
+                        "std": _f_std, "n_locations": _f_n,
+                    })
+                _forest_df = pd.DataFrame(_forest_stats)
+                _forest_df = _forest_df.sort_values("grand_mean",
+                                                     ascending=_is_asc).head(_forest_n).reset_index(drop=True)
+
+                fig_forest = go.Figure()
+                fig_forest.add_trace(go.Scatter(
+                    x=_forest_df["grand_mean"],
+                    y=list(range(len(_forest_df))),
+                    error_x=dict(
+                        type="data", symmetric=False,
+                        array=(_forest_df["CI_high"] - _forest_df["grand_mean"]).tolist(),
+                        arrayminus=(_forest_df["grand_mean"] - _forest_df["CI_low"]).tolist(),
+                    ),
+                    mode="markers",
+                    marker=dict(size=8, color="#1abc9c"),
+                    text=_forest_df["rule"],
+                    hovertemplate="%{text}<br>Mean: %{x:.4f}<extra></extra>",
+                ))
+                fig_forest.update_layout(
+                    yaxis=dict(tickmode="array", tickvals=list(range(len(_forest_df))),
+                               ticktext=[r[:35] for r in _forest_df["rule"]], autorange="reversed"),
+                    xaxis_title=f"{_meta_metric} (grand mean across locations)",
+                    height=max(400, len(_forest_df) * 25),
+                    margin=dict(l=280, r=30, t=30, b=30),
+                    title=f"Forest Plot: {_meta_metric} ({'lower=better' if _is_asc else 'higher=better'})",
+                )
+                st.plotly_chart(fig_forest, width='stretch')
+
+                # Rule x Location interaction
+                st.markdown("### Rule x Location Interaction Test")
+                st.caption("Tests whether rule performance depends on location (significant interaction = location-dependent).")
+                try:
+                    import statsmodels.api as _sm_meta
+                    import statsmodels.formula.api as _smf_meta
+                    _inter_df = _meta_df.copy()
+                    _inter_df["label"] = _inter_df["label"].astype(str)
+                    _inter_df["rule"] = _inter_df["rule"].astype(str)
+                    _inter_model = _smf_meta.ols("value ~ C(rule) + C(label) + C(rule):C(label)", data=_inter_df).fit()
+                    _inter_anova = _sm_meta.stats.anova_lm(_inter_model, typ=2)
+
+                    _inter_display = _inter_anova.copy()
+                    _inter_display.index = _inter_display.index.str.replace("C(rule):C(label)", "Rule x Location", regex=False)
+                    _inter_display.index = _inter_display.index.str.replace("C(rule)", "Rule", regex=False)
+                    _inter_display.index = _inter_display.index.str.replace("C(label)", "Location", regex=False)
+                    st.dataframe(_inter_display.style.format("{:.4f}"), width='stretch')
+
+                    _inter_p = _inter_anova.loc["C(rule):C(label)", "PR(>F)"] if "C(rule):C(label)" in _inter_anova.index else 1.0
+                    if _inter_p < 0.05:
+                        st.warning(f"Significant interaction (p={_inter_p:.3g}): Rule recommendations are location-dependent. "
+                                   "Caution when generalizing across different geographic areas.")
+                    else:
+                        st.success(f"No significant interaction (p={_inter_p:.3g}): Rule rankings are generalizable across locations.")
+                except ImportError:
+                    st.info("statsmodels required for interaction test. Install with: pip install statsmodels")
+                except Exception as e_inter:
+                    st.warning(f"Interaction test failed: {e_inter}")
+
+                # Universally-good vs location-dependent rules
+                st.markdown("### Rule Classification: Universal vs Location-Dependent")
+                _class_df = _meta_wide.copy()
+                _class_ranks = _meta_ranks.copy()
+                _class_mean_rank = _class_ranks.mean(axis=1)
+                _class_rank_std = _class_ranks.std(axis=1, ddof=1) if _meta_ranks.shape[1] > 1 else pd.Series(0, index=_class_ranks.index)
+                _class_cv = _class_rank_std / _class_mean_rank.replace(0, np.nan)
+
+                _class_summary = pd.DataFrame({
+                    "rule": _class_df.index,
+                    "mean_rank": _class_mean_rank.values,
+                    "rank_std": _class_rank_std.values,
+                    "rank_CV": _class_cv.values,
+                    "grand_mean": _class_df.mean(axis=1).values,
+                }).sort_values("mean_rank").reset_index(drop=True)
+
+                _class_summary["classification"] = "Moderate"
+                _good_thresh = _m_n * 0.25
+                _class_summary.loc[
+                    (_class_summary["mean_rank"] <= _good_thresh) & (_class_summary["rank_CV"] < 0.3),
+                    "classification"
+                ] = "Universally Good"
+                _class_summary.loc[_class_summary["rank_CV"] > 0.5, "classification"] = "Location-Dependent"
+
+                st.dataframe(
+                    _class_summary.style.format({
+                        "mean_rank": "{:.1f}", "rank_std": "{:.2f}",
+                        "rank_CV": "{:.3f}", "grand_mean": "{:.4f}"
+                    }),
+                    width='stretch', hide_index=True,
+                )
+                _n_univ = len(_class_summary[_class_summary["classification"] == "Universally Good"])
+                _n_dep = len(_class_summary[_class_summary["classification"] == "Location-Dependent"])
+                st.caption(f"Universally Good: {_n_univ} rules (top 25% mean rank, CV < 0.3). "
+                           f"Location-Dependent: {_n_dep} rules (rank CV > 0.5).")
+
+                # Tornado Diagram (Rank Variation)
+                st.markdown("### Tornado Diagram (Rank Variation)")
+                _tornado_n = st.slider("Show top N rules", 5, 64, 20, 1, key="tornado_n")
+
+                _stability_t = _class_summary.head(_tornado_n).copy()
+                _stability_t = _stability_t.sort_values("mean_rank", ascending=False)
+
+                fig_tornado = go.Figure()
+                _t_range = _stability_t["mean_rank"].max() - _stability_t["mean_rank"].min()
+                fig_tornado.add_trace(go.Bar(
+                    y=[r[:35] for r in _stability_t["rule"]],
+                    x=(_stability_t["rank_std"] * 2).tolist(),
+                    orientation='h',
+                    marker=dict(
+                        color=_stability_t["rank_CV"].tolist(),
+                        colorscale="RdYlGn_r", cmin=0, cmax=1,
+                        colorbar=dict(title="CV"),
+                    ),
+                    text=[f"Rank {r:.1f}" for r in _stability_t["mean_rank"]],
+                    textposition="outside",
+                    hovertemplate="%{y}<br>Mean rank: %{text}<br>Rank spread: %{x:.1f}<extra></extra>",
+                ))
+                fig_tornado.update_layout(
+                    xaxis_title="Rank Spread (2 x std)",
+                    height=max(400, _tornado_n * 25),
+                    margin=dict(l=300, r=80, t=30, b=30),
+                    title=f"Rule Rank Variation Across Locations ({_meta_metric})",
+                )
+                st.plotly_chart(fig_tornado, width='stretch')
+
+                # Factor-Level Sensitivity
+                st.markdown("### Factor-Level Sensitivity")
+                st.caption("Which factors have the most influence on performance across locations?")
+
+                _factor_cols = ["Phase", "RedPolicy", "RedAction", "YellowAction"]
+                _avail_f = [f for f in _factor_cols if f in _meta_df.columns and _meta_df[f].nunique() > 1]
+
+                if _avail_f:
+                    _f_effects = []
+                    for _f in _avail_f:
+                        _f_means = _meta_df.groupby(_f)["value"].mean()
+                        _f_range = _f_means.max() - _f_means.min()
+                        _f_effects.append({
+                            "factor": _f, "range": _f_range,
+                            "levels": _f_means.to_dict(), "n_levels": len(_f_means),
+                        })
+                    _f_df = pd.DataFrame(_f_effects).sort_values("range", ascending=False)
+
+                    fig_fmain = go.Figure()
+                    fig_fmain.add_trace(go.Bar(
+                        y=_f_df["factor"], x=_f_df["range"],
+                        orientation='h', marker=dict(color="#1abc9c"),
+                        text=[f"{r:.4f}" for r in _f_df["range"]],
+                        textposition="outside",
+                    ))
+                    fig_fmain.update_layout(
+                        xaxis_title=f"Range of Level Means ({_meta_metric})",
+                        height=250, margin=dict(l=150, r=80, t=30, b=30),
+                        title="Factor Main Effect Sizes",
+                    )
+                    st.plotly_chart(fig_fmain, width='stretch')
+
+                    for _fe in _f_effects:
+                        with st.expander(f"Factor: {_fe['factor']} ({_fe['n_levels']} levels)"):
+                            _ldf = pd.DataFrame([
+                                {"level": k, f"{_meta_metric}_mean": v}
+                                for k, v in _fe["levels"].items()
+                            ]).sort_values(f"{_meta_metric}_mean", ascending=_is_asc)
+                            st.dataframe(_ldf, width='stretch', hide_index=True)
+                            st.info(f"Best level: **{_ldf.iloc[0]['level']}** "
+                                    f"({_meta_metric} = {_ldf.iloc[0][f'{_meta_metric}_mean']:.4f})")
+                else:
+                    st.info("Factor columns not found in data.")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Scenario Config Diff
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown("---")
+st.markdown("## Scenario Config Diff")
+st.caption("Compare YAML configurations between two experiments/coordinates.")
+
+if "rc_base_path" in st.session_state and st.session_state.rc_base_path:
+    _diff_bp = st.session_state.rc_base_path
+else:
+    _diff_bp = DEFAULT_LOCAL_BASE_PATH
+
+import yaml as _yaml_diff
+import os as _os_diff
+
+_diff_scenarios_dir = Path(_diff_bp) / "scenarios" if _diff_bp else None
+if _diff_scenarios_dir and _diff_scenarios_dir.is_dir():
+    _diff_exps = sorted([d.name for d in _diff_scenarios_dir.iterdir() if d.is_dir() and not d.name.startswith(".")])
+    if len(_diff_exps) >= 1:
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            st.markdown("**Config A**")
+            _diff_exp_a = st.selectbox("Experiment A", _diff_exps, key="diff_exp_a")
+            _diff_coords_a_dir = _diff_scenarios_dir / _diff_exp_a
+            _diff_coords_a = sorted([d.name for d in _diff_coords_a_dir.iterdir()
+                                      if d.is_dir() and not d.name.startswith(".")]) if _diff_coords_a_dir.is_dir() else []
+            _diff_coord_a = st.selectbox("Coordinate A", _diff_coords_a, key="diff_coord_a") if _diff_coords_a else None
+
+        with col_d2:
+            st.markdown("**Config B**")
+            _diff_exp_b = st.selectbox("Experiment B", _diff_exps, key="diff_exp_b")
+            _diff_coords_b_dir = _diff_scenarios_dir / _diff_exp_b
+            _diff_coords_b = sorted([d.name for d in _diff_coords_b_dir.iterdir()
+                                      if d.is_dir() and not d.name.startswith(".")]) if _diff_coords_b_dir.is_dir() else []
+            _diff_coord_b = st.selectbox("Coordinate B", _diff_coords_b, key="diff_coord_b") if _diff_coords_b else None
+
+        if _diff_coord_a and _diff_coord_b and st.button("Compare Configs", key="btn_diff"):
+            _yaml_a_path = _diff_scenarios_dir / _diff_exp_a / _diff_coord_a / f"config_{_diff_coord_a}.yaml"
+            _yaml_b_path = _diff_scenarios_dir / _diff_exp_b / _diff_coord_b / f"config_{_diff_coord_b}.yaml"
+
+            def _flatten_dict(d, prefix=""):
+                items = {}
+                for k, v in d.items():
+                    key = f"{prefix}.{k}" if prefix else k
+                    if isinstance(v, dict):
+                        items.update(_flatten_dict(v, key))
+                    elif isinstance(v, list):
+                        items[key] = str(v)
+                    else:
+                        items[key] = v
+                return items
+
+            if not _yaml_a_path.is_file():
+                st.error(f"Config A not found: {_yaml_a_path}")
+            elif not _yaml_b_path.is_file():
+                st.error(f"Config B not found: {_yaml_b_path}")
+            else:
+                with open(_yaml_a_path, "r", encoding="utf-8") as f:
+                    _cfg_a = _yaml_diff.safe_load(f)
+                with open(_yaml_b_path, "r", encoding="utf-8") as f:
+                    _cfg_b = _yaml_diff.safe_load(f)
+
+                _flat_a = _flatten_dict(_cfg_a) if _cfg_a else {}
+                _flat_b = _flatten_dict(_cfg_b) if _cfg_b else {}
+                _all_keys = sorted(set(list(_flat_a.keys()) + list(_flat_b.keys())))
+
+                _diff_rows = []
+                for _dk in _all_keys:
+                    _va = _flat_a.get(_dk, "(missing)")
+                    _vb = _flat_b.get(_dk, "(missing)")
+                    _status = "Same" if str(_va) == str(_vb) else "Different"
+                    _diff_rows.append({
+                        "Parameter": _dk,
+                        "Config A": str(_va),
+                        "Config B": str(_vb),
+                        "Status": _status,
+                    })
+                _diff_result = pd.DataFrame(_diff_rows)
+
+                _show_all = st.checkbox("Show all parameters (including identical)", value=False, key="diff_show_all")
+                if not _show_all:
+                    _diff_result = _diff_result[_diff_result["Status"] == "Different"]
+
+                if _diff_result.empty:
+                    st.success("Configurations are identical.")
+                else:
+                    n_diff = len(_diff_result[_diff_result["Status"] == "Different"])
+                    st.info(f"{n_diff} parameter(s) differ between the two configs.")
+                    st.dataframe(_diff_result, width='stretch', hide_index=True)
+
+                # CSV file comparison
+                with st.expander("CSV Input File Comparison"):
+                    _csv_a_dir = _diff_scenarios_dir / _diff_exp_a / _diff_coord_a
+                    _csv_b_dir = _diff_scenarios_dir / _diff_exp_b / _diff_coord_b
+                    _csv_files_a = sorted([f.name for f in _csv_a_dir.glob("*.csv")]) if _csv_a_dir.is_dir() else []
+                    _csv_files_b = sorted([f.name for f in _csv_b_dir.glob("*.csv")]) if _csv_b_dir.is_dir() else []
+                    _csv_all_files = sorted(set(_csv_files_a + _csv_files_b))
+
+                    _csv_comp = []
+                    for _cf in _csv_all_files:
+                        _fa = _csv_a_dir / _cf
+                        _fb = _csv_b_dir / _cf
+                        _row = {"file": _cf}
+                        if _fa.is_file():
+                            try:
+                                _dfa = pd.read_csv(_fa, encoding="utf-8")
+                            except Exception:
+                                try:
+                                    _dfa = pd.read_csv(_fa, encoding="cp949")
+                                except Exception:
+                                    _dfa = pd.DataFrame()
+                            _row["A_rows"] = len(_dfa)
+                            _row["A_cols"] = len(_dfa.columns)
+                        else:
+                            _row["A_rows"] = "(missing)"
+                            _row["A_cols"] = "(missing)"
+                        if _fb.is_file():
+                            try:
+                                _dfb = pd.read_csv(_fb, encoding="utf-8")
+                            except Exception:
+                                try:
+                                    _dfb = pd.read_csv(_fb, encoding="cp949")
+                                except Exception:
+                                    _dfb = pd.DataFrame()
+                            _row["B_rows"] = len(_dfb)
+                            _row["B_cols"] = len(_dfb.columns)
+                        else:
+                            _row["B_rows"] = "(missing)"
+                            _row["B_cols"] = "(missing)"
+                        _csv_comp.append(_row)
+
+                    if _csv_comp:
+                        st.dataframe(pd.DataFrame(_csv_comp), width='stretch', hide_index=True)
+    else:
+        st.info("No experiment folders found for config diff.")
+else:
+    st.info("Set base path above to enable config diff.")

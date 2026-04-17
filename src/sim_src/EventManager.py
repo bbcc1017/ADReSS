@@ -2,10 +2,12 @@ import heapq
 import numpy as np
 
 class EventManager():
-    def __init__(self, ev_info, en_manager, rng=None):
+    def __init__(self, ev_info, en_manager, rng=None, enable_trace=False):
         self.ev_info = ev_info
         self.en_manager = en_manager
         self.properties = self.en_manager.en_properties
+        self.enable_trace = enable_trace
+        self.trace_log = []
 
         if rng is not None:
             self.rng = rng
@@ -22,6 +24,7 @@ class EventManager():
         self.status = self.en_manager.en_status # load entity status
         self.rescue_finish = False # rescue completion flag
         self.event_queue = [] # event queue initialized
+        self.trace_log = []  # reset trace
         # Incident onset
         init_log = {}
         init_log, _ = self.ev_onset(init_log, None)
@@ -116,6 +119,8 @@ class EventManager():
                 self.status['patient']['p_states'][p_idx, 2] = 1  # move
                 self.status['patient']['p_sent'][h_idx] += 1 # sent record
                 self.add_event(elapsed_time, 'amb_arrival_hospital', (p_idx, a_idx, h_idx))
+                self._record_trace("transport_start", patient_id=int(p_idx), vehicle="AMB",
+                                   vehicle_id=int(a_idx), hospital_id=int(h_idx), severity=int(p_class))
             elif mode == 1: # uav
                 u_idx = self.status['uav']['uav_wait'][0].pop()
                 elapsed_time = tranportation_t + self.properties['uav']['uav_handover_time'] # total patient delivery time
@@ -124,6 +129,8 @@ class EventManager():
                 self.status['patient']['p_states'][p_idx, 2] = 1  # move
                 self.status['patient']['p_sent'][h_idx] += 1  # sent record
                 self.add_event(elapsed_time, 'uav_arrival_hospital', (p_idx, u_idx, h_idx))
+                self._record_trace("transport_start", patient_id=int(p_idx), vehicle="UAV",
+                                   vehicle_id=int(u_idx), hospital_id=int(h_idx), severity=int(p_class))
 
             # 3. If R/Y patients remain at site and transport mode is available, request additional decision
             hasAvailableMode = bool(self.status['ambulance']['amb_wait'][0] or self.status['uav']['uav_wait'][0])
@@ -318,6 +325,9 @@ class EventManager():
             self.add_event(elapsed_time=t, ev_name='uav_arrival_site', entity_idx=(u_idx,))
         self.status['uav']['uav_states'][:,1] = time_uav
 
+        self._record_trace("onset", n_patients=int(sum(p_num)),
+                           severity_dist=[int(x) for x in p_num])
+
         log = {'rescue_times': rescue_times}
         return log, False
 
@@ -334,6 +344,7 @@ class EventManager():
         p_class = self.status['patient']['p_states'][p_idx, 0]
         self.status['patient']['p_states'][p_idx, 1] = 1 # rescued
         self.status['patient']['p_wait'][p_class][0].append(p_idx)
+        self._record_trace("rescue", patient_id=int(p_idx), severity=int(p_class))
         self.rescue_finish = np.all(self.status['patient']['p_states'][:, 1] == 1) # if min value is 0, still un-rescued patients exist
 
         hasAvailableMode = bool(self.status['ambulance']['amb_wait'][0] or self.status['uav']['uav_wait'][0])
@@ -402,6 +413,7 @@ class EventManager():
             h_tier = self.properties['hospital']['hos_tier'][h_idx]
             service_time = self.sample_service_time(h_tier=h_tier, p_class=p_class)
             log['p_admit'].append((self.time, p_class))
+            self._record_trace("care_start", patient_id=int(p_idx), hospital_id=int(h_idx), severity=int(p_class))
             # Update hospital and patient status
             self.status['hospital']['h_states'][h_idx, 0] -= 1  # n_idle -= 1
             # Add event
@@ -456,6 +468,8 @@ class EventManager():
             self.status['hospital']['h_states'][h_idx, -1] += 1
             handover_time = self.properties['ambulance']['amb_handover_time']
             self.add_event(handover_time, 'p_care_ready', (p_idx, h_idx))
+            self._record_trace("hospital_arrival", patient_id=int(p_idx), vehicle="AMB",
+                               hospital_id=int(h_idx), severity=int(p_class), admitted=True)
         else:
             destination = self.diversion_rule(h_idx,
                                               pass_to_tier3=p_info['treat_tier3'][p_class],
@@ -463,6 +477,8 @@ class EventManager():
                                               mode=0)
             self.status['patient']['p_sent'][h_idx] -= 1
             self.status['patient']['p_sent'][destination-1] += 1
+            self._record_trace("diversion", patient_id=int(p_idx), vehicle="AMB",
+                               from_hospital=int(h_idx), to_hospital=int(destination-1), severity=int(p_class))
 
         transportation_t = self.sample_transportation_time(mode=0, origination=h_idx + 1, destination=destination)
         if destination == 0:
@@ -505,6 +521,8 @@ class EventManager():
             self.status['hospital']['h_states'][h_idx, -1] += 1
             handover_time = self.properties['uav']['uav_handover_time']
             self.add_event(handover_time, 'p_care_ready', (p_idx, h_idx))
+            self._record_trace("hospital_arrival", patient_id=int(p_idx), vehicle="UAV",
+                               hospital_id=int(h_idx), severity=int(p_class), admitted=True)
         else:
             destination = self.diversion_rule(h_idx,
                                               pass_to_tier3=p_info['treat_tier3'][p_class],
@@ -512,6 +530,8 @@ class EventManager():
                                               mode=1)
             self.status['patient']['p_sent'][h_idx] -= 1
             self.status['patient']['p_sent'][destination-1] += 1
+            self._record_trace("diversion", patient_id=int(p_idx), vehicle="UAV",
+                               from_hospital=int(h_idx), to_hospital=int(destination-1), severity=int(p_class))
 
         transportation_t = self.sample_transportation_time(mode=1, origination=h_idx + 1, destination=destination)
         if destination == 0:
@@ -532,6 +552,7 @@ class EventManager():
         p_idx, h_idx = entity_idx
         # Update treated patient status
         self.status['patient']['p_states'][p_idx, -1] = 1
+        self._record_trace("care_complete", patient_id=int(p_idx), hospital_id=int(h_idx))
 
         n_idle, n_queue = self.status['hospital']['h_states'][h_idx][0:2]
         # Start new treatment
@@ -554,6 +575,17 @@ class EventManager():
         else:
             self.status['hospital']['h_states'][h_idx, 0] += 1  # n_idle += 1
         return log, False
+
+    def _record_trace(self, event_type, **kwargs):
+        """Record a trace event if tracing is enabled."""
+        if self.enable_trace:
+            record = {"time": self.time, "event": event_type}
+            record.update(kwargs)
+            self.trace_log.append(record)
+
+    def get_trace(self):
+        """Return the accumulated trace log."""
+        return list(self.trace_log)
 
     def add_event(self, elapsed_time, ev_name, entity_idx):
         self.e_ID += 1
