@@ -7,6 +7,10 @@
 
 ![Dashboard Screenshot](docs/images/dashboard_maps.png)
 
+> **Full Feature Demo:** See the interactive dashboard in action below.
+
+![Dashboard Demo](docs/gif/dash_play.gif)
+
 ## Project Overview
 
 A simulation and analysis platform for **optimizing patient transport** during Mass Casualty Incidents (MCI).
