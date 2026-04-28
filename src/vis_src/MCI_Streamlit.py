@@ -2312,34 +2312,50 @@ with tabs[0]:
             },
             key="tbl_uav_out"
         )
-        # Synchronize dispatch and transport selection
         selected_indices = set(edited_uav_out.loc[edited_uav_out["Show"]==True, "Index"].tolist())
         st.session_state.uav_c2s_sel_idx = selected_indices
-        st.session_state.uav_s2h_sel_idx = selected_indices
 
-    # Transport (Incident -> Hospital): same helipad hospitals as dispatch (round-trip shuttle)
+    # Transport (Incident -> Hospital): all candidate hospitals with helipad
     with col_uav_back:
         st.markdown("**Incident Site → Helipad Hospital (Transport)**")
 
-        # UAV operates as round-trip shuttle: transport to same helipad hospitals as dispatch
-        # Use same data as uav_out_df
-        uav_back_df = uav_out_df.copy()
+        # UAV Transport: all candidate hospitals from hinfo_df where Helipad == 1
+        uav_transport_latlons = []
+        if not hinfo_df.empty and "Helipad" in hinfo_df.columns:
+            heli_mask = pd.to_numeric(hinfo_df["Helipad"], errors="coerce").fillna(0).astype(int) == 1
+            for _, rr in hinfo_df[heli_mask].iterrows():
+                _idx = int(rr["Index"])
+                _name = str(rr.get("Hospital Name", "")).strip()
+                _code = rr.get("Grade Code", 1)
+                if _name in xl_coord:
+                    _y, _x = xl_coord[_name]
+                    uav_transport_latlons.append((_y, _x, _name, _code, _idx))
 
-        # Share session state (dispatch and transport have same selection state)
+        uav_back_rows = []
+        for _y, _x, _nm, _code, _orig_idx in uav_transport_latlons:
+            dkm = _haversine_km(lat, lon, _y, _x)
+            duration_min = (dkm / uav_velocity) * 60
+            uav_back_rows.append({
+                "Index": _orig_idx,
+                "Hospital": _nm,
+                "Grade Code": _code,
+                "Hospital Grade": code_to_grade(_code),
+                "Distance(km)": round(dkm, 2),
+                "Duration(min)": round(duration_min, 1),
+            })
+        uav_back_df = pd.DataFrame(uav_back_rows)
+
         if "uav_s2h_sel_idx" not in st.session_state:
-            st.session_state.uav_s2h_sel_idx = st.session_state.uav_c2s_sel_idx.copy()
+            st.session_state.uav_s2h_sel_idx = set(uav_back_df["Index"].tolist()) if not uav_back_df.empty else set()
 
         g1, g2 = st.columns(2)
         if g1.button("UAV Transport Select All"):
             st.session_state.uav_s2h_sel_idx = set(uav_back_df["Index"].tolist())
-            st.session_state.uav_c2s_sel_idx = set(uav_back_df["Index"].tolist())
         if g2.button("UAV Transport Deselect All"):
             st.session_state.uav_s2h_sel_idx = set()
-            st.session_state.uav_c2s_sel_idx = set()
 
         uav_back_df_show = uav_back_df.copy()
         uav_back_df_show["Show"] = uav_back_df_show["Index"].apply(lambda i: i in st.session_state.uav_s2h_sel_idx)
-        # Move 'Show' to front, distance and duration to end
         uav_back_df_show = uav_back_df_show[["Show","Index","Hospital","Grade Code","Hospital Grade","Distance(km)","Duration(min)"]]
 
         edited_uav_back = st.data_editor(
@@ -2358,10 +2374,7 @@ with tabs[0]:
             },
             key="tbl_uav_back"
         )
-        # Synchronize dispatch and transport selection
-        selected_indices = set(edited_uav_back.loc[edited_uav_back["Show"]==True, "Index"].tolist())
-        st.session_state.uav_s2h_sel_idx = selected_indices
-        st.session_state.uav_c2s_sel_idx = selected_indices
+        st.session_state.uav_s2h_sel_idx = set(edited_uav_back.loc[edited_uav_back["Show"]==True, "Index"].tolist())
 
     # ─────────────────────────────────────────────────────────────────────
     # Map creation and output (displayed in top-level map_holder)
@@ -2553,16 +2566,30 @@ with tabs[0]:
         )
 
     # -- UAV Transport (Incident -> Helipad Hospital) --
-    # UAV operates as round-trip shuttle: departs from helipad hospital and returns to same hospital
-    # Uses same hospital list as uav_dispatch_latlons
-    for i, (y, x, name, code) in enumerate(uav_dispatch_latlons):
-        if i not in st.session_state.uav_s2h_sel_idx:
+    # Draw transport lines to all candidate hospitals with helipad
+    _dispatch_names = {n for (_, _, n, _) in uav_dispatch_latlons}
+    for _y, _x, _name, _code, _orig_idx in uav_transport_latlons:
+        if _orig_idx not in st.session_state.uav_s2h_sel_idx:
             continue
-        dkm = _haversine_km(lat, lon, y, x)
+        dkm = _haversine_km(lat, lon, _y, _x)
+
+        # Add marker only for hospitals not already shown by dispatch
+        if _name not in _dispatch_names:
+            _beds_val = None
+            _ops_val = None
+            if not hinfo_df.empty:
+                _row = hinfo_df[hinfo_df["Hospital Name"] == _name]
+                if not _row.empty:
+                    _beds_val = _row.iloc[0].get("Beds")
+                    _ops_val = _row.iloc[0].get("ORs")
+            _grade_label = code_to_grade(_code)
+            _extras = [f"Grade: {_grade_label}", f"🛩️ Site→Helipad: {dkm:.2f} km"]
+            add_hospital_marker(m, _name, _code, (_y, _x), _ops_val, _beds_val, _extras)
+
         draw_uav_dash(
-            m, (lat,lon), (y,x),
+            m, (lat,lon), (_y,_x),
             UAV_BACK_COLOR,
-            f"🛩️ Transport Site→{name} · {dkm:.2f} km"
+            f"🛩️ Transport Site→{_name} · {dkm:.2f} km"
         )
 
     # -- Legend/speed --
