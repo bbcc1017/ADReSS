@@ -716,6 +716,7 @@ def parse_log_blocks(log_text: str) -> List[Dict]:
     blocks = []
     cur_iter = None                         # <- [added] store current Iter
     cur = {"rule": "(Unlabeled)", "iter": cur_iter, "events": [], "actions": []}  # <- [changed]
+    seen_first_iter = False  # Discard lines before the first "Iter : N" (throw-away env init reset output)
 
     for raw in log_text.splitlines():
         s = raw.strip()
@@ -726,9 +727,14 @@ def parse_log_blocks(log_text: str) -> List[Dict]:
         miter = ITER_RE.match(s)
         if miter:
             cur_iter = int(miter.group(1))
+            seen_first_iter = True
             # Inject iter into in-progress block (update if missing/None)
             if "iter" not in cur or cur.get("iter") is None:
                 cur["iter"] = cur_iter
+            continue
+
+        # Pre-"Iter : 1" lines are not part of the actual simulation run; skip them.
+        if not seen_first_iter:
             continue
 
         mhead = RULE_HEADER_RE.match(s)
