@@ -2344,6 +2344,8 @@ with tabs[0]:
                 "Duration(min)": round(duration_min, 1),
             })
         uav_back_df = pd.DataFrame(uav_back_rows)
+        if uav_back_df.empty:
+            uav_back_df = pd.DataFrame(columns=["Index","Hospital","Grade Code","Hospital Grade","Distance(km)","Duration(min)"])
 
         if "uav_s2h_sel_idx" not in st.session_state:
             st.session_state.uav_s2h_sel_idx = set(uav_back_df["Index"].tolist()) if not uav_back_df.empty else set()
