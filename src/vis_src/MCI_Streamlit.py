@@ -1848,7 +1848,23 @@ with tabs[1]:
                                     ],
                                 )
 
-                                st.plotly_chart(fig_anim, width='stretch')
+                                # Animated Plotly charts (figures with frames)
+                                # render blank on the very first DOM mount of the
+                                # session: the component mounts before its frames
+                                # are laid out and the initial draw is dropped.
+                                # Every other Rule/Iter is viewed after a selectbox
+                                # change (a rerun), which updates the already-mounted
+                                # component and redraws it correctly, so only the
+                                # default first Rule/Iter 1 shown on initial load is
+                                # blank. Fix: (1) a CONSTANT key so a single
+                                # persistent component is updated (not remounted) on
+                                # every selection, and (2) a one-time per-session
+                                # rerun so the first animation gets the second render
+                                # pass that every later selection already receives.
+                                st.plotly_chart(fig_anim, width='stretch', key="patient_anim_chart")
+                                if not st.session_state.get("_anim_first_render_done"):
+                                    st.session_state["_anim_first_render_done"] = True
+                                    st.rerun()
 
                                 # Legend
                                 _legend_md = " | ".join(
