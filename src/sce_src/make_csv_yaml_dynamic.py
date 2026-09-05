@@ -796,8 +796,8 @@ class ScenarioGenerator:
         dist_euc_path = os.path.join(save_folder, "distance_Hos2Site_euc.csv")
         dist_euc_df.to_csv(dist_euc_path, index=True, index_label="Index", encoding="utf-8-sig")
 
-        road_info = df_road[["operating_rooms", "capa", "type_code", "institution_name", "helipad"]].copy()
-        road_info.columns = ["num_or", "num_beds", "type_code", "institution_name", "helipad"]
+        road_info = df_road[["operating_rooms", "capa", "type_code", "institution_name", "helipad", "x_coord", "y_coord"]].copy()
+        road_info.columns = ["num_or", "num_beds", "type_code", "institution_name", "helipad", "x_coord", "y_coord"]
         road_info_path = os.path.join(save_folder, "hospital_info_road.csv")
         road_info.to_csv(road_info_path, index=True, index_label="Index", encoding="utf-8-sig")
 
@@ -869,26 +869,8 @@ class ScenarioGenerator:
                 f"cannot deploy {uav_n} UAVs."
             )
 
-        # 5) Calculate incident-to-hospital Euclidean distance (hospital_info lacks coordinates, so fetch from original Excel)
-        # hospital_info_road.csv may already have distance info, but we safely fetch coordinates from the original
-        try:
-            df_full_excel = pd.read_excel(self.hospital_data_path, engine="openpyxl")
-        except Exception as e:
-            print(f"❌ Failed to load original Excel data: {e}")
-            return
-
-        # Match coordinates by hospital name
-        df_helipad_in_pool = df_helipad_in_pool.merge(
-            df_full_excel[["institution_name", "x_coord", "y_coord"]],
-            on="institution_name",
-            how="left"
-        )
-
-        # Check for hospitals with missing coordinates
-        if df_helipad_in_pool[["x_coord", "y_coord"]].isnull().any().any():
-            missing_hospitals = df_helipad_in_pool[df_helipad_in_pool[["x_coord", "y_coord"]].isnull().any(axis=1)]["institution_name"].tolist()
-            print(f"⚠️ Warning: The following hospitals have no coordinate info: {missing_hospitals}")
-            df_helipad_in_pool = df_helipad_in_pool.dropna(subset=["x_coord", "y_coord"])
+        # 5) Preserve each selected hospital's identity, including same-name hospitals.
+        df_helipad_in_pool = self._with_hospital_coordinates(df_helipad_in_pool)
 
         df_helipad_in_pool["distance"] = df_helipad_in_pool.apply(
             lambda row: haversine((row["y_coord"], row["x_coord"]), (latitude, longitude)),
@@ -943,28 +925,32 @@ class ScenarioGenerator:
         df.to_csv(save_path, index=False, encoding="utf-8-sig")
         print(f"  ✅ Patient info generation complete")
 
+    def _with_hospital_coordinates(self, hospitals):
+        """Use stored coordinates; only unique names can resolve legacy inputs."""
+        coord_columns = {"x_coord", "y_coord"}
+        present = coord_columns.intersection(hospitals.columns)
+        if present and present != coord_columns:
+            raise ValueError("Hospital coordinates require both x_coord and y_coord.")
+        if not present:
+            master = pd.read_excel(self.hospital_data_path, engine="openpyxl")
+            unique = master.drop_duplicates("institution_name", keep=False)
+            hospitals = hospitals.merge(
+                unique[["institution_name", "x_coord", "y_coord"]],
+                on="institution_name", how="left", validate="many_to_one", sort=False
+            )
+        if hospitals[["x_coord", "y_coord"]].isna().any().any():
+            raise ValueError("Missing or ambiguous hospital coordinates; regenerate the scenario.")
+        return hospitals
+
     def make_distance_Hos2Hos(self, save_folder):
         """Generate inter-hospital distance matrix"""
         print(f"  📐 Generating inter-hospital distance matrix...")
-        try:
-            df_full = pd.read_excel(self.hospital_data_path, engine="openpyxl")
-        except Exception as e:
-            print(f"❌ Failed to load hospital data: {e}")
-            return
-
         # Euclidean (CRITICAL FIX: generated in road order)
         try:
             # Use hospital_info_road.csv instead of hospital_info_euc.csv (index consistency)
             file_road = os.path.join(save_folder, "hospital_info_road.csv")
-            df_road_hos = pd.read_csv(file_road, encoding="utf-8-sig")
-            names_road = df_road_hos["institution_name"].tolist()
-            coords_road = []
-            for name in names_road:
-                row = df_full[df_full["institution_name"] == name]
-                if not row.empty:
-                    coords_road.append((row.iloc[0]["y_coord"], row.iloc[0]["x_coord"]))
-                else:
-                    coords_road.append((0, 0))
+            df_road_hos = self._with_hospital_coordinates(pd.read_csv(file_road, encoding="utf-8-sig"))
+            coords_road = list(zip(df_road_hos["y_coord"], df_road_hos["x_coord"]))
             N = len(coords_road)
             matrix = np.zeros((N, N))
             for i in range(N):
@@ -980,53 +966,48 @@ class ScenarioGenerator:
             print(f"  ✅ Inter-hospital Euclidean distance matrix complete (road order)")
         except Exception as e:
             print(f"❌ Euclidean distance calculation failed: {e}")
+            raise
 
         # Road (using Excel file - pre-calculated data)
         try:
             file_road = os.path.join(save_folder, "hospital_info_road.csv")
-            df_road = pd.read_csv(file_road, encoding="utf-8-sig")
-            names_road = df_road["institution_name"].tolist()
+            df_road = self._with_hospital_coordinates(pd.read_csv(file_road, encoding="utf-8-sig"))
 
             # Load pre-calculated distance matrix from Excel
             excel_path = os.path.join(self.base_path, "scenarios", "DISTANCE_MATRIX_FINAL.xlsx")
             print(f"  📂 Loading Excel distance matrix: {excel_path}")
-            df_matrix = pd.read_excel(excel_path, sheet_name="Distance_Matrix", engine="openpyxl")
+            # Keep duplicate name columns intact and identify hospitals by name and coordinates.
+            raw = pd.read_excel(excel_path, sheet_name="Distance_Matrix", engine="openpyxl", header=None)
+            info = pd.read_excel(excel_path, sheet_name="Hospital_Info", engine="openpyxl")
+            names = raw.iloc[0, 1:].astype(str).tolist()
+            values = raw.iloc[1:, 1:].to_numpy(dtype=float)
+            if (values.shape != (len(info), len(info))
+                    or names != raw.iloc[1:, 0].astype(str).tolist()
+                    or names != info["institution_name"].astype(str).tolist()):
+                raise ValueError("Distance matrix axes must match Hospital_Info row order.")
+            if not np.isfinite(values).all() or (values < 0).any():
+                raise ValueError("Distance matrix must contain finite, nonnegative distances in km.")
 
-            # Use first column as index (hospital names)
-            df_matrix_indexed = df_matrix.set_index(df_matrix.columns[0])  # Use first column as index
+            def coord_key(row):
+                return (str(row["institution_name"]), round(float(row["x_coord"]), 6),
+                        round(float(row["y_coord"]), 6))
 
-            # Build distance matrix by looking up values
-            N = len(names_road)
-            matrix = np.zeros((N, N))
-            missing_hospitals = []
-
-            for i in range(N):
-                for j in range(N):
-                    if i == j:
-                        matrix[i][j] = 0
-                    else:
-                        hospital_i = names_road[i]
-                        hospital_j = names_road[j]
-
-                        # Look up distance from Excel matrix
-                        if hospital_i in df_matrix_indexed.index and hospital_j in df_matrix_indexed.columns:
-                            dist = df_matrix_indexed.loc[hospital_i, hospital_j]
-                            matrix[i][j] = float(dist) if pd.notna(dist) else 0
-                        else:
-                            matrix[i][j] = 0
-                            if hospital_i not in missing_hospitals:
-                                missing_hospitals.append(hospital_i)
-                            if hospital_j not in missing_hospitals:
-                                missing_hospitals.append(hospital_j)
-
-            if missing_hospitals:
-                print(f"  ⚠️ Hospitals not found in Excel ({len(missing_hospitals)}): {missing_hospitals[:5]}...")
+            lookup = {coord_key(row): i for i, row in info.iterrows()}
+            if len(lookup) != len(info):
+                raise ValueError("Hospital_Info contains duplicate name-coordinate keys.")
+            try:
+                indices = [lookup[coord_key(row)] for _, row in df_road.iterrows()]
+            except KeyError as e:
+                raise ValueError(f"Selected hospital is missing from the distance matrix: {e}") from e
+            matrix = values[np.ix_(indices, indices)].copy()
+            np.fill_diagonal(matrix, 0)
 
             save_path_road = os.path.join(save_folder, "distance_Hos2Hos_road.csv")
             pd.DataFrame(matrix).to_csv(save_path_road, index=True, encoding="utf-8-sig")
             print(f"  ✅ Inter-hospital road distance matrix complete (using Excel data)")
         except Exception as e:
             print(f"❌ Road distance calculation failed: {e}")
+            raise
         print(f"  ✅ Inter-hospital distance matrix generation complete")
 
     def _sanitize_coeff_text(self, text: str) -> str:
